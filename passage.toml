@@ -1,0 +1,10 @@
+# Development defaults; administration is always loopback-only in v0.1.
+proxy_listen = "0.0.0.0:8081"
+admin_listen = "127.0.0.1:8080"
+data_dir = "./data"
+
+# Optional inbound TLS using an existing certificate. Restart after replacement.
+# [tls]
+# listen = "0.0.0.0:8443"
+# certificate = "/etc/passage/tls/fullchain.pem"
+# private_key = "/etc/passage/tls/privkey.pem"

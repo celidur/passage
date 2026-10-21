@@ -1,0 +1,82 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: #101c1680;
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 5;
+  overflow-y: auto;
+}
+.dialog {
+  width: 530px;
+  max-width: 100%;
+  background: #fcfdf9;
+  border-radius: 14px;
+  padding: 29px;
+  box-shadow: 0 20px 90px #0003;
+  max-height: 95vh;
+  overflow-y: auto;
+}
+.dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 26px;
+}
+.dialog-head h2 {
+  font-size: 23px;
+}
+.dialog-foot {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 26px;
+  border-top: 1px solid #e4e9db;
+  padding-top: 20px;
+}
+
+/* Forms inside dialogs */
+.dialog form > label,
+.form-row {
+  margin-top: 18px;
+}
+.dialog input {
+  font-size: 12px;
+}
+.dialog form > small {
+  display: block;
+  margin-top: 8px;
+}
+.form-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 13px;
+}
+.checkbox {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+}
+.checkbox input {
+  width: auto;
+  margin: 0;
+  accent-color: #365638;
+}
+
+@media (max-width: 760px) {
+  .overlay {
+    padding: 12px;
+  }
+  .dialog {
+    padding: 23px;
+  }
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+  .dialog-foot .primary {
+    padding: 11px;
+  }
+}

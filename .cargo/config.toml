@@ -1,0 +1,3 @@
+[env]
+# Use the distribution OpenSSL rather than compiling a second copy.
+OPENSSL_NO_VENDOR = "1"

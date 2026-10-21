@@ -1,0 +1,9 @@
+proxy_listen = "0.0.0.0:80"
+admin_listen = "127.0.0.1:8080"
+data_dir = "/var/lib/passage"
+
+# Optional existing TLS certificate (one certificate for the whole listener):
+# [tls]
+# listen = "0.0.0.0:443"
+# certificate = "/etc/passage/tls/fullchain.pem"
+# private_key = "/etc/passage/tls/privkey.pem"

@@ -1,0 +1,9 @@
+target/
+web/node_modules/
+data/
+*.sqlite*
+*.token
+
+__pycache__/
+
+web/dist/
