@@ -1,6 +1,8 @@
 proxy_listen = "0.0.0.0:80"
 admin_listen = "127.0.0.1:8080"
 data_dir = "/var/lib/passage"
+# How often upstream host names are looked up again, in seconds.
+# dns_refresh_secs = 30
 
 # Optional existing TLS certificate (one certificate for the whole listener):
 # [tls]

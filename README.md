@@ -13,6 +13,9 @@ Passage aims to combine Nginx Proxy Manager’s approachable interface with Trae
 | | Feature |
 |---|---|
 | ✅ | Pingora proxy with exact-host and longest-path-prefix routing, HTTP/HTTPS upstreams with verified TLS |
+| ✅ | Several upstreams per route with round-robin or least-connections balancing, health checks, automatic DNS refresh and failover |
+| ✅ | Per-route timeouts, concurrency and request-size limits, so a slow or dead application stays contained |
+| ✅ | HTTP/2, WebSocket, streaming responses and gRPC |
 | ✅ | Web dashboard to create, edit, search, disable and delete routes |
 | ✅ | SQLite persistence with an audit log; changes apply live, without restarting |
 | ✅ | Inbound HTTPS with an existing certificate |
@@ -20,7 +23,7 @@ Passage aims to combine Nginx Proxy Manager’s approachable interface with Trae
 | ✅ | Install script and hardened systemd service |
 | 🔜 | Automatic certificates (ACME) and per-host SNI |
 | 🔜 | Administrator accounts and dashboard login through an identity provider (OIDC) |
-| 🔜 | Health checks, load balancing, backups, `.deb` packages, Docker |
+| 🔜 | Backups, rate limiting, `.deb` packages, Docker |
 
 ## Quick start
 
@@ -60,10 +63,10 @@ The administration interface only listens on loopback; reach it with `ssh -L 808
 ## Project layout
 
 ```text
-src/        Rust: proxy/ (Pingora pipeline), api/ (management API), routes/ (model and routing table),
-            state, store (SQLite), commands (init/check/serve)
+src/        Rust: proxy/ (Pingora pipeline), upstream/ (backend pools, health, DNS refresh), api/ (management API),
+            routes/ (model, policy and routing table), state, store (SQLite), commands (init/check/serve)
 web/src/    React dashboard: api/ client, layout/, components/, features/<name>/
-tests/      End-to-end smoke tests (harness.py + smoke.py)
+tests/      End-to-end tests: smoke.py (+ harness.py) and protocols.rs (HTTP/2, gRPC)
 packaging/  systemd unit and default server configuration
 scripts/    install.sh
 ```

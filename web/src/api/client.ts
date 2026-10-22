@@ -1,4 +1,4 @@
-import type {Route, RouteInput, Status} from './types';
+import type {Route, RouteInput, RouteUpstreams, Status} from './types';
 
 export class UnauthorizedError extends Error {}
 
@@ -31,6 +31,7 @@ export function createClient(token: string, onUnauthorized: (message: string) =>
   return {
     status: () => request<Status>('/status'),
     listRoutes: () => request<Route[]>('/routes'),
+    upstreams: () => request<RouteUpstreams[]>('/upstreams'),
     createRoute: (input: RouteInput) => request<Route>('/routes', 'POST', input),
     updateRoute: (id: string, input: RouteInput) => request<Route>(routePath(id), 'PUT', input),
     deleteRoute: (id: string) => request<void>(routePath(id), 'DELETE'),

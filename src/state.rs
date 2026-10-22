@@ -56,7 +56,10 @@ impl AppState {
                 routes.remove(index.ok_or(UpdateError::NotFound)?);
             }
         }
-        let snapshot = Snapshot::compile(routes)
+        let snapshot = self
+            .snapshot
+            .load_full()
+            .recompile(routes)
             .await
             .map_err(UpdateError::Invalid)?;
         self.store.apply(&change).map_err(UpdateError::Storage)?;

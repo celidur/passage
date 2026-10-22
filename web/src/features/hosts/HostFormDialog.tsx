@@ -5,6 +5,7 @@ import {ErrorMessage} from '../../components/Alert';
 import {Dialog} from '../../components/Dialog';
 import {useAsyncAction} from '../../hooks/useAsyncAction';
 import {EMPTY_HOST_FORM, toForm, toInput, type HostForm} from './host';
+import {PolicyFields} from './PolicyFields';
 
 type Props = {
   /** `null` creates a new host. */
@@ -62,10 +63,20 @@ export function HostFormDialog({route, onSave, onClose}: Props) {
           </label>
         </div>
         <label>
-          Upstream origin
-          <input type="url" required value={form.upstream} onChange={(e) => update({upstream: e.target.value})} />
+          Upstream origins <span className="hint">ONE PER LINE</span>
+          <textarea
+            required
+            rows={2}
+            spellCheck={false}
+            placeholder={'http://10.0.0.5:3000\nhttp://10.0.0.6:3000'}
+            value={form.upstreams}
+            onChange={(e) => update({upstreams: e.target.value})}
+          />
         </label>
-        <small>Full request path is preserved. DNS resolves when the route is saved.</small>
+        <small>
+          Traffic is shared between origins. The full request path is preserved. Host names are looked up
+          again periodically.
+        </small>
         <div className="auth-section">
           <label>
             Forward authentication URL <span>OPTIONAL</span>
@@ -82,6 +93,10 @@ export function HostFormDialog({route, onSave, onClose}: Props) {
           <input type="checkbox" checked={form.enabled} onChange={(e) => update({enabled: e.target.checked})} />
           Enable this host
         </label>
+        <details className="advanced">
+          <summary>Advanced: balancing, timeouts, limits and health</summary>
+          <PolicyFields policy={form.policy} onChange={(policy) => update({policy})} />
+        </details>
         <ErrorMessage>{error}</ErrorMessage>
         <div className="dialog-foot">
           <button type="button" className="secondary" onClick={onClose}>

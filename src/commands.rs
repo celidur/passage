@@ -2,11 +2,14 @@
 
 use crate::{
     api, config::Config, proxy::PassageProxy, routes::Snapshot, state::AppState, store::Store,
-    token::AdminToken,
+    token::AdminToken, upstream::Maintenance,
 };
 use anyhow::{Context, Result};
-use pingora::{prelude::*, services::background::background_service};
-use std::{os::unix::fs::PermissionsExt, sync::Arc};
+use pingora::{
+    apps::HttpServerOptions, listeners::tls::TlsSettings, prelude::*,
+    services::background::background_service,
+};
+use std::{os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
 
 const TOKEN_FILE: &str = "admin.token";
 const DATABASE_FILE: &str = "passage.sqlite";
@@ -27,7 +30,7 @@ pub fn init(config: &Config) -> Result<()> {
 }
 
 pub fn check(config: &Config) -> Result<()> {
-    let state = load(config)?;
+    let state = load(config, true)?;
     println!(
         "Configuration valid: {} active routes",
         state.snapshot.load().active_routes()
@@ -36,7 +39,7 @@ pub fn check(config: &Config) -> Result<()> {
 }
 
 pub fn serve(config: Config) -> Result<()> {
-    let state = Arc::new(load(&config)?);
+    let state = Arc::new(load(&config, false)?);
     let admin = api::bind(config.admin_listen).context("cannot bind management listener")?;
 
     let mut server = Server::new(None)?;
@@ -51,19 +54,31 @@ pub fn serve(config: Config) -> Result<()> {
         PassageProxy::new(state.clone())?,
     );
     proxy.add_tcp(&config.proxy_listen.to_string());
+    // Cleartext HTTP/2 (prior knowledge) is what plain gRPC clients speak.
+    let mut options = HttpServerOptions::default();
+    options.h2c = true;
+    proxy
+        .app_logic_mut()
+        .expect("proxy logic not shared during startup")
+        .server_options = Some(options);
     if let Some(tls) = &config.tls {
-        proxy.add_tls(
-            &tls.listen.to_string(),
+        let mut settings = TlsSettings::intermediate(
             tls.certificate
                 .to_str()
                 .context("invalid certificate path")?,
             tls.private_key.to_str().context("invalid key path")?,
         )?;
+        settings.enable_h2();
+        proxy.add_tls_with_settings(&tls.listen.to_string(), None, settings);
     }
     server.add_service(proxy);
     server.add_service(background_service(
         "management",
-        api::Management::new(state, admin),
+        api::Management::new(state.clone(), admin),
+    ));
+    server.add_service(background_service(
+        "upstream-maintenance",
+        Maintenance::new(state, Duration::from_secs(config.dns_refresh_secs)),
     ));
 
     tracing::info!(
@@ -76,14 +91,14 @@ pub fn serve(config: Config) -> Result<()> {
 }
 
 /// Reads the token and stored routes, resolving every enabled upstream.
-fn load(config: &Config) -> Result<AppState> {
+fn load(config: &Config, strict: bool) -> Result<AppState> {
     let token = AdminToken::read(&config.data_dir.join(TOKEN_FILE))?;
     let store = Store::open(&config.data_dir.join(DATABASE_FILE))?;
     let routes = store.load()?;
     let snapshot = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?
-        .block_on(Snapshot::compile(routes))
+        .block_on(Snapshot::compile(routes, strict))
         .context("stored routes are invalid")?;
     Ok(AppState::new(store, snapshot, token))
 }

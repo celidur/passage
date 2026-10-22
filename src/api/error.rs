@@ -16,6 +16,10 @@ pub struct ApiError {
 }
 
 impl ApiError {
+    pub fn new(status: StatusCode, message: String) -> Self {
+        Self { status, message }
+    }
+
     pub fn bad_request(error: anyhow::Error) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,

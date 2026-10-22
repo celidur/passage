@@ -246,6 +246,53 @@ td {
   display: block;
   margin-top: 8px;
 }
+.hint {
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #9da78e;
+  margin-left: 5px;
+}
+.advanced {
+  border-top: 1px solid #e4e9db;
+  margin-top: 23px;
+  padding-top: 18px;
+}
+.advanced summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: #4c5f50;
+}
+.policy h3 {
+  font-size: 9px;
+  letter-spacing: 1.8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #8a987d;
+  margin: 22px 0 0;
+}
+.policy .form-row {
+  margin-top: 13px;
+}
+.policy small {
+  display: block;
+  margin-top: 8px;
+}
+.policy .checkbox {
+  margin-top: 16px;
+}
+.more,
+.upstream-health {
+  display: block;
+  margin-top: 5px;
+  font-size: 9px;
+}
+.upstream-health {
+  color: #7a9457;
+}
+.upstream-health.degraded {
+  color: #b4622f;
+}
 
 @media (max-width: 1100px) {
   .stats article {

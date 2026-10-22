@@ -43,7 +43,9 @@
 .form-row {
   margin-top: 18px;
 }
-.dialog input {
+.dialog input,
+.dialog select,
+.dialog textarea {
   font-size: 12px;
 }
 .dialog form > small {
@@ -54,6 +56,12 @@
   display: grid;
   grid-template-columns: 2fr 1fr;
   gap: 13px;
+}
+.form-row.halves {
+  grid-template-columns: 1fr 1fr;
+}
+.form-row.thirds {
+  grid-template-columns: 1fr 1fr 1fr;
 }
 .checkbox {
   display: flex;
@@ -73,7 +81,9 @@
   .dialog {
     padding: 23px;
   }
-  .form-row {
+  .form-row,
+  .form-row.halves,
+  .form-row.thirds {
     grid-template-columns: 1fr;
   }
   .dialog-foot .primary {

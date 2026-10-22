@@ -1,4 +1,7 @@
-use super::path::canonical_path;
+use super::{
+    path::canonical_path,
+    policy::{MAX_UPSTREAMS, Policy},
+};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -11,11 +14,14 @@ pub struct RouteInput {
     pub host: String,
     #[serde(default = "root_path")]
     pub path_prefix: String,
-    pub upstream: String,
+    /// Origins that share the traffic, e.g. `http://10.0.0.5:3000`.
+    pub upstreams: Vec<String>,
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
     #[serde(default)]
     pub forward_auth_url: Option<String>,
+    #[serde(default)]
+    pub policy: Policy,
 }
 
 fn root_path() -> String {
@@ -43,7 +49,19 @@ impl RouteInput {
         );
         self.host = normalize_host(&self.host)?;
         self.path_prefix = normalize_prefix(&self.path_prefix)?;
-        self.upstream = normalize_upstream(&self.upstream)?;
+        ensure!(
+            (1..=MAX_UPSTREAMS).contains(&self.upstreams.len()),
+            "provide between 1 and {MAX_UPSTREAMS} upstreams"
+        );
+        for upstream in &mut self.upstreams {
+            *upstream = normalize_upstream(upstream)?;
+        }
+        let mut seen = std::collections::HashSet::new();
+        ensure!(
+            self.upstreams.iter().all(|u| seen.insert(u.as_str())),
+            "upstreams must be distinct"
+        );
+        self.policy.validate()?;
         self.forward_auth_url = match self.forward_auth_url.as_deref().map(str::trim) {
             None | Some("") => None,
             Some(auth) => Some(endpoint(auth)?.to_string()),
@@ -94,7 +112,7 @@ fn normalize_upstream(value: &str) -> Result<String> {
 }
 
 /// Parses an HTTP(S) URL without credentials or fragment.
-pub(super) fn endpoint(value: &str) -> Result<Url> {
+pub(crate) fn endpoint(value: &str) -> Result<Url> {
     let url = Url::parse(value)?;
     ensure!(
         matches!(url.scheme(), "http" | "https") && url.host().is_some(),
@@ -116,9 +134,10 @@ mod tests {
             name: " test ".into(),
             host: "App.Local.".into(),
             path_prefix: path.into(),
-            upstream: "http://127.0.0.1:9000/".into(),
+            upstreams: vec!["http://127.0.0.1:9000/".into()],
             enabled: true,
             forward_auth_url: Some("  ".into()),
+            policy: Policy::default(),
         }
     }
 
@@ -129,8 +148,59 @@ mod tests {
         assert_eq!(route.name, "test");
         assert_eq!(route.host, "app.local");
         assert_eq!(route.path_prefix, "/api/v1");
-        assert_eq!(route.upstream, "http://127.0.0.1:9000");
+        assert_eq!(route.upstreams, ["http://127.0.0.1:9000"]);
         assert!(route.forward_auth_url.is_none());
+    }
+
+    #[test]
+    fn upstream_list_and_policy_are_validated() {
+        let mut route = input("/");
+        route.upstreams.clear();
+        assert!(route.validate().is_err(), "at least one upstream");
+
+        let mut route = input("/");
+        route.upstreams = vec!["http://a.local:1".into(), "http://a.local:1/".into()];
+        assert!(route.validate().is_err(), "duplicates after normalization");
+
+        let mut route = input("/");
+        route.upstreams = (0..17).map(|i| format!("http://10.0.0.{i}:80")).collect();
+        assert!(route.validate().is_err(), "too many upstreams");
+
+        let mut route = input("/");
+        route.policy.timeouts.read_secs = 0;
+        assert!(route.validate().is_err());
+        let mut route = input("/");
+        route.policy.limits.max_connections = Some(0);
+        assert!(route.validate().is_err());
+        let mut route = input("/");
+        route.policy.retries = 6;
+        assert!(route.validate().is_err());
+        let mut route = input("/");
+        let check = crate::routes::policy::ActiveCheck {
+            timeout_secs: 30,
+            ..Default::default()
+        };
+        route.policy.health.check = Some(check);
+        assert!(route.validate().is_err(), "timeout above interval");
+    }
+
+    #[test]
+    fn policy_defaults_apply_and_unknown_fields_are_rejected() {
+        let route: RouteInput = serde_json::from_str(
+            r#"{"name":"a","host":"a.local","upstreams":["http://127.0.0.1:1"],
+                "policy":{"timeouts":{"read_secs":5},"health":{"check":{"path":"/up"}}}}"#,
+        )
+        .unwrap();
+        assert_eq!(route.policy.timeouts.read_secs, 5);
+        assert_eq!(route.policy.timeouts.connect_secs, 5);
+        assert_eq!(route.policy.retries, 2);
+        assert_eq!(route.policy.health.check.unwrap().interval_secs, 10);
+        assert!(
+            serde_json::from_str::<RouteInput>(
+                r#"{"name":"a","host":"a.local","upstreams":[],"policy":{"timeout":1}}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
