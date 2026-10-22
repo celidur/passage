@@ -22,6 +22,9 @@ export type Policy = {
   health: {max_failures: number; cooldown_secs: number; check: ActiveCheck | null};
 };
 
+/** HTTPS for a host: an automatic certificate, and optionally a redirect from plain HTTP. */
+export type Https = {enabled: boolean; redirect: boolean};
+
 /** Fields accepted by `POST /api/routes` and `PUT /api/routes/{id}`. */
 export type RouteInput = {
   name: string;
@@ -30,6 +33,7 @@ export type RouteInput = {
   upstreams: string[];
   enabled: boolean;
   forward_auth_url: string | null;
+  https: Https;
   policy: Policy;
 };
 
@@ -43,7 +47,29 @@ export type Status = {
   routes: number;
   requests: number;
   failures: number;
+  /** What this server can do about HTTPS, as configured. */
+  https: {enabled: boolean; acme: boolean; dns_01: boolean};
 };
+
+export type CertificateChallenge = 'http-01' | 'dns-01';
+export type CertificateStatus = 'pending' | 'issuing' | 'valid' | 'expired' | 'failed';
+
+/** A managed certificate. Times are Unix seconds. */
+export type Certificate = {
+  id: string;
+  domains: string[];
+  challenge: CertificateChallenge;
+  status: CertificateStatus;
+  created_at: number;
+  not_before: number | null;
+  not_after: number | null;
+  /** The latest failure; also set while a renewal fails and the current certificate still serves. */
+  last_error: string | null;
+  failures: number;
+  next_attempt: number | null;
+};
+
+export type NewCertificate = {domains: string[]; challenge: CertificateChallenge};
 
 export type BackendStatus = {
   upstream: string;

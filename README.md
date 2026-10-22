@@ -18,10 +18,11 @@ Passage aims to combine Nginx Proxy Manager’s approachable interface with Trae
 | ✅ | HTTP/2, WebSocket, streaming responses and gRPC |
 | ✅ | Web dashboard to create, edit, search, disable and delete routes |
 | ✅ | SQLite persistence with an audit log; changes apply live, without restarting |
-| ✅ | Inbound HTTPS with an existing certificate |
+| ✅ | Automatic HTTPS: tick a box on a host and its certificate is ordered over ACME (Let’s Encrypt or another authority), chosen per domain by SNI, renewed and swapped in without dropping a connection |
+| ✅ | HTTP-01 validation, DNS-01 for wildcard certificates through a DNS hook, HTTP to HTTPS redirect, and certificate expiry and errors in the dashboard |
 | ✅ | Per-route forward authentication to protect applications behind an external SSO (provider-specific testing pending) |
 | ✅ | Install script and hardened systemd service |
-| 🔜 | Automatic certificates (ACME) and per-host SNI |
+| 🔜 | Built-in DNS providers for wildcard certificates |
 | 🔜 | Administrator accounts and dashboard login through an identity provider (OIDC) |
 | 🔜 | Backups, rate limiting, `.deb` packages, Docker |
 
@@ -63,10 +64,11 @@ The administration interface only listens on loopback; reach it with `ssh -L 808
 ## Project layout
 
 ```text
-src/        Rust: proxy/ (Pingora pipeline), upstream/ (backend pools, health, DNS refresh), api/ (management API),
-            routes/ (model, policy and routing table), state, store (SQLite), commands (init/check/serve)
+src/        Rust: proxy/ (Pingora pipeline), upstream/ (backend pools, health, DNS refresh), certificates/
+            (SNI, ACME, renewal), api/ (management API), routes/ (model, policy and routing table), state,
+            store (SQLite and migrations), commands (init/check/serve)
 web/src/    React dashboard: api/ client, layout/, components/, features/<name>/
-tests/      End-to-end tests: smoke.py (+ harness.py) and protocols.rs (HTTP/2, gRPC)
+tests/      End-to-end tests: smoke.py (+ harness.py, fake_acme.py) and protocols.rs (HTTP/2, gRPC)
 packaging/  systemd unit and default server configuration
 scripts/    install.sh
 ```

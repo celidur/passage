@@ -39,7 +39,7 @@ impl Passage {
         std::fs::write(
             &config,
             format!(
-                "proxy_listen = \"{proxy}\"\nadmin_listen = \"{admin}\"\ndata_dir = \"{}\"\n",
+                "[general]\ndata_dir = \"{}\"\n[admin]\nlisten = \"{admin}\"\n[http]\nlisten = \"{proxy}\"\n",
                 data.display()
             ),
         )

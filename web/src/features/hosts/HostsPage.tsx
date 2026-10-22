@@ -9,11 +9,12 @@ import {HostsTable} from './HostsTable';
 import {StatsGrid} from './StatsGrid';
 import {matchesQuery} from './host';
 import type {Hosts} from './useHosts';
+import type {Certificates} from '../certificates/useCertificates';
 import './hosts.css';
 
 type Editing = {route: Route | null} | null;
 
-export function HostsPage({hosts}: {hosts: Hosts}) {
+export function HostsPage({hosts, certificates}: {hosts: Hosts; certificates: Certificates}) {
   const {routes, upstreams, status, loadError, refresh, save, remove} = hosts;
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
@@ -68,7 +69,13 @@ export function HostsPage({hosts}: {hosts: Hosts}) {
           </div>
         </div>
         {visible.length ? (
-          <HostsTable routes={visible} upstreams={upstreams} onEdit={openEditor} onDelete={setDeleting} />
+          <HostsTable
+            routes={visible}
+            upstreams={upstreams}
+            certificates={certificates.certificates}
+            onEdit={openEditor}
+            onDelete={setDeleting}
+          />
         ) : (
           <EmptyState searching={query !== ''} onAdd={() => openEditor(null)} />
         )}
@@ -88,7 +95,7 @@ export function HostsPage({hosts}: {hosts: Hosts}) {
         <p>
           SSO integrates through your identity provider’s forward-auth endpoint.
           <br />
-          <span>Native OIDC and automatic certificates are planned for a later release.</span>
+          <span>Native OIDC is planned for a later release.</span>
         </p>
         {status && <span className="release">PASSAGE / v{status.version}</span>}
       </div>
@@ -96,11 +103,17 @@ export function HostsPage({hosts}: {hosts: Hosts}) {
       {editing && (
         <HostFormDialog
           route={editing.route}
+          https={status?.https}
           onClose={() => setEditing(null)}
           onSave={async (input) => {
             await save(editing.route?.id ?? null, input);
+            await certificates.refresh();
             setEditing(null);
-            setNotice('Route saved. Changes are live.');
+            setNotice(
+              input.https.enabled
+                ? 'Route saved. Its certificate is being requested; follow it under Certificates.'
+                : 'Route saved. Changes are live.',
+            );
           }}
         />
       )}

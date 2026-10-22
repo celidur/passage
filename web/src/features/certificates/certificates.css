@@ -1,0 +1,73 @@
+/* Certificates page; the panel and table styles come from the hosts feature. */
+.cert-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+}
+.cert-status .dot {
+  width: 5px;
+  height: 5px;
+}
+.cert-status.ok {
+  color: #7a9457;
+}
+.cert-status.warn {
+  color: #b08a2e;
+}
+.cert-status.warn .dot {
+  background: #d4a93e;
+}
+.cert-status.bad {
+  color: #b4462f;
+}
+.cert-status.bad .dot {
+  background: #d1694f;
+}
+.cert-error {
+  display: block;
+  max-width: 340px;
+  margin-top: 6px;
+  font-size: 9px;
+  color: #b4462f;
+  overflow-wrap: anywhere;
+}
+.cert-error span {
+  color: #a08b85;
+}
+.expiry {
+  display: block;
+  font-size: 11px;
+}
+.expiry.at-risk {
+  color: #b4462f;
+}
+.expiry-date {
+  display: block;
+  margin-top: 4px;
+  font-size: 9px;
+}
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin: 0 0 25px;
+  padding: 14px 16px;
+  border: 1px solid #ead9a8;
+  border-radius: 8px;
+  background: #fbf5e3;
+  color: #8a6d1f;
+}
+.warning svg {
+  flex: none;
+  margin-top: 2px;
+}
+.warning p {
+  font-size: 11px;
+  line-height: 1.7;
+  color: #8a6d1f;
+}
+.warning code {
+  background: #f3e8c4;
+  color: #7a5f12;
+}

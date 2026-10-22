@@ -1,6 +1,7 @@
 //! Passage: a bare-metal reverse proxy manager built on Pingora.
 
 pub mod api;
+pub mod certificates;
 pub mod commands;
 pub mod config;
 pub mod metrics;

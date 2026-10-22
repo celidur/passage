@@ -20,7 +20,7 @@ Each enabled route owns a pool of one to sixteen upstream origins. **Every addre
 
 **Active health.** `health.check` is optional. Every `interval_secs` each backend gets an HTTP GET on `path` (2xx and 3xx are healthy, redirects are not followed, HTTP/1.1 only, certificates verified like proxied traffic) or a plain TCP connection (`kind: tcp`, for HTTP/2-only upstreams such as gRPC). A backend changes state only after `unhealthy_threshold` or `healthy_threshold` consecutive results. Backends start healthy until their first probe.
 
-**DNS refresh.** Hostnames are looked up again every `dns_refresh_secs` (default 30; the system resolver exposes no TTL) and every two seconds while a name has not resolved. Up to 16 addresses per name are kept, in sorted order so that a rotated answer is not a change. Backends whose address is unchanged keep their health and load. A failed or empty lookup keeps the last known addresses and logs a warning. Startup tolerates names that do not resolve yet, and the route starts answering 503 until they do; `passage check` and saves through the API are strict and refuse them.
+**DNS refresh.** Hostnames are looked up again every `general.dns_refresh_secs` (default 30; the system resolver exposes no TTL) and every two seconds while a name has not resolved. Up to 16 addresses per name are kept, in sorted order so that a rotated answer is not a change. Backends whose address is unchanged keep their health and load. A failed or empty lookup keeps the last known addresses and logs a warning. Startup tolerates names that do not resolve yet, and the route starts answering 503 until they do; `passage check` and saves through the API are strict and refuse them.
 
 **Retries.** A refused or timed-out connection never reached the application, so any method moves to another backend, up to `policy.retries` extra attempts. A backend that drops a fresh connection before answering is bypassed only for idempotent methods, so a POST is never replayed. Read timeouts are never retried: a slow application is not sent the same work twice.
 
@@ -51,8 +51,25 @@ An optional per-route `forward_auth_url` is called with a GET, the original Auth
 
 Only a fixed allowlist of Remote-* and X-Auth-Request-* / X-Forwarded-* identity response headers reaches the upstream. Client-supplied X-Auth-*, X-Authentik-*, Remote-*, X-Forwarded-*, and Forwarded headers are removed before authorization. Provider-specific response cookies and arbitrary identity headers are not supported in this initial implementation; configure the identity provider accordingly. Native OIDC for the dashboard, group policies, and interactive login flows are planned separately.
 
-## Certificates and deployment
+## Automatic HTTPS
 
-An optional static certificate/key enables an additional inbound TLS listener that negotiates HTTP/2 or HTTP/1.1; upstream HTTPS validates certificates with OpenSSL. There is one certificate per listener, no per-host SNI certificate registry yet. Certificate replacement requires restart. ACME, renewal, DNS-01 and HTTP-01 are planned, not implemented.
+The `[https]` section adds an HTTPS listener beside the plain `[http]` one; it negotiates HTTP/2 or HTTP/1.1. Its certificate is chosen per TLS server name (SNI) during the handshake from the certificates Passage manages: an exact name beats a wildcard (`*.example.com` covers exactly one label), and both beat the optional fallback certificate (`https.certificate`) used for unknown names and clients that send no name. With no fallback, an unknown name fails the handshake. Routes are served on both listeners; HTTPS is an addition, not a mode.
+
+**Hot reload.** The live certificate set is an immutable table swapped atomically, exactly like the routing table. A newly issued or renewed certificate is used by the next handshake; connections already open keep theirs, so nothing is interrupted and no restart is needed. Certificates and keys are read from the database on startup, so a restart serves HTTPS immediately without contacting the authority. The fallback certificate is read at startup only.
+
+**Enabling HTTPS on a host.** A route with `https.enabled` makes sure a certificate covers its host when it is saved, after the route has been validated: an existing managed certificate (exact or wildcard) is reused; otherwise an HTTP-01 certificate for that host is ordered; with no `[acme]` configured, the fallback certificate stands in, and without it the save is refused. Deleting or disabling the route never deletes the certificate. `https.redirect` answers plain HTTP requests for the host with `308` to `https://<host>[:port]<path>`. The port is the HTTPS listener's and is left out when it is 443.
+
+**Issuing.** A background service orders certificates from the ACME authority in `acme.directory_url` (Let's Encrypt by default) with an account created on first use, whose credentials are stored per directory. A certificate gets a fresh ECDSA P-256 key per order. Orders run one at a time.
+
+- **HTTP-01.** The proof is served from memory at `/.well-known/acme-challenge/<token>` on the plain HTTP listener for any Host, before routing and before the HTTPS redirect, so a host that redirects everything else can still be validated. Port 80 must reach Passage and the domain must point to the server.
+- **DNS-01.** Required for wildcards. Passage runs the configured `acme.dns_hook` as `hook present|cleanup <record name> <value>` (arguments, never a shell), waits `dns_propagation_secs`, asks the authority to validate, then removes the records. The hook can drive any DNS provider; a non-zero exit fails the order with its error output. Built-in providers are not included yet.
+
+**Renewing.** A certificate is renewed `renew_before_days` (30) before it expires, or at two thirds of its lifetime when it is shorter, so short-lived certificates do not renew in a loop. A failed attempt keeps the current certificate serving, records the error, and retries after 5 minutes, doubling up to about 5 hours. The dashboard shows each certificate's status, expiry and last error, and can renew one immediately.
+
+**Limits.** Accounts and certificates are for one server; there is no OCSP stapling, no ARI-driven renewal, no certificate revocation, and no import of externally issued certificates beyond the fallback. Private keys are stored in the SQLite database inside the 0700 data directory; protect backups of it like the administrator token. A host name must be a public dotted name; single-label names and IP addresses cannot get certificates.
+
+## Deployment
+
+Upstream HTTPS validates certificates with OpenSSL.
 
 The installer creates a dedicated system user, preserves existing config/data, and installs a hardened systemd unit. It deliberately leaves service activation to the operator. The service can bind low ports via CAP_NET_BIND_SERVICE rather than root. Releases should target Debian/Ubuntu x86-64 first. Docker, Kubernetes, clustering, and automatic discovery are later phases.

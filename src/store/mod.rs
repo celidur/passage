@@ -1,4 +1,7 @@
+mod certificates;
 mod migrations;
+
+pub use certificates::StoredCertificate;
 
 use crate::routes::Route;
 use anyhow::Result;

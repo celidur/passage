@@ -37,7 +37,7 @@ impl ApiError {
     pub fn not_found() -> Self {
         Self {
             status: StatusCode::NOT_FOUND,
-            message: "route not found".into(),
+            message: "not found".into(),
         }
     }
 

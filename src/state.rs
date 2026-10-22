@@ -1,4 +1,5 @@
 use crate::{
+    certificates::Certificates,
     metrics::Metrics,
     routes::{Route, Snapshot},
     store::{Change, Store},
@@ -13,7 +14,8 @@ pub struct AppState {
     pub snapshot: ArcSwap<Snapshot>,
     pub metrics: Metrics,
     pub admin_token: AdminToken,
-    store: Store,
+    pub certificates: Arc<Certificates>,
+    store: Arc<Store>,
     writes: tokio::sync::Mutex<()>,
 }
 
@@ -26,11 +28,17 @@ pub enum UpdateError {
 }
 
 impl AppState {
-    pub fn new(store: Store, snapshot: Snapshot, admin_token: AdminToken) -> Self {
+    pub fn new(
+        store: Arc<Store>,
+        snapshot: Snapshot,
+        admin_token: AdminToken,
+        certificates: Arc<Certificates>,
+    ) -> Self {
         Self {
             snapshot: ArcSwap::from_pointee(snapshot),
             metrics: Metrics::default(),
             admin_token,
+            certificates,
             store,
             writes: tokio::sync::Mutex::new(()),
         }
@@ -62,6 +70,16 @@ impl AppState {
             .recompile(routes)
             .await
             .map_err(UpdateError::Invalid)?;
+        if let Change::Create(route) | Change::Update(route) = &change
+            && route.input.enabled
+            && route.input.https.enabled
+        {
+            // After validation, so an invalid route never triggers a certificate order.
+            self.certificates
+                .ensure_for(&route.input.host)
+                .await
+                .map_err(UpdateError::Invalid)?;
+        }
         self.store.apply(&change).map_err(UpdateError::Storage)?;
         self.snapshot.store(Arc::new(snapshot));
         tracing::info!(

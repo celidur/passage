@@ -1,6 +1,7 @@
 //! The loopback-only management API and embedded dashboard.
 
 mod assets;
+mod certificates;
 mod error;
 mod json;
 mod middleware;
@@ -25,6 +26,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .merge(status::router())
         .merge(routes::router())
+        .merge(certificates::router())
         .merge(upstreams::router())
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

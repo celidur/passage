@@ -32,6 +32,7 @@ export const EMPTY_HOST_FORM: HostForm = {
   upstreams: 'http://127.0.0.1:3000',
   enabled: true,
   forward_auth_url: '',
+  https: {enabled: false, redirect: false},
   policy: DEFAULT_POLICY,
 };
 
