@@ -37,7 +37,7 @@ cargo build --locked
 ./target/debug/passage serve
 ```
 
-Open **http://127.0.0.1:8080** and enter the token from `data/admin.token`. Initialization never overwrites an existing token. Do not commit or share this file. The proxy listens on port **8081** by default.
+Open **http://127.0.0.1:8081** and enter the token from `data/admin.token`. Initialization never overwrites an existing token. Do not commit or share this file. The proxy listens on port **8080** by default.
 
 Start an example upstream in a separate terminal:
 
@@ -48,12 +48,12 @@ python3 -m http.server 9000 --bind 127.0.0.1
 In the dashboard create a host with domain `demo.local`, path `/`, and upstream `http://127.0.0.1:9000`. Test without changing DNS:
 
 ```sh
-curl -H 'Host: demo.local' http://127.0.0.1:8081/
+curl -H 'Host: demo.local' http://127.0.0.1:8080/
 ```
 
 For HTTPS, uncomment the `[https]` section in `passage.toml`; `[acme]` then orders certificates automatically (see below). `general.dns_refresh_secs` (default 30) sets how often upstream host names are looked up again.
 
-For dashboard work, keep `passage serve` running and start the Vite dev server with hot reload; it forwards `/api` to `127.0.0.1:8080`:
+For dashboard work, keep `passage serve` running and start the Vite dev server with hot reload; it forwards `/api` to `127.0.0.1:8081`:
 
 ```sh
 cd web && npm run dev
@@ -113,10 +113,10 @@ The service uses `/etc/passage/config.toml`, stores data in `/var/lib/passage`, 
 For remote administration:
 
 ```sh
-ssh -L 8080:127.0.0.1:8080 user@server
+ssh -L 8081:127.0.0.1:8081 user@server
 ```
 
-Open http://127.0.0.1:8080 locally. Read the initial token on the server with `sudo cat /var/lib/passage/admin.token`. Keep the administration listener private; do not configure a public proxy route pointing to it.
+Open http://127.0.0.1:8081 locally. Read the initial token on the server with `sudo cat /var/lib/passage/admin.token`. Keep the administration listener private; do not configure a public proxy route pointing to it.
 
 To upgrade, stop the service, back up the data directory, rerun the installer with the new binary, and start it again. The installer preserves existing configuration and credentials. For a consistent backup, stop Passage before copying its complete data directory (including any SQLite WAL files). Automated backup/restore tooling is planned. The database migrates itself when a newer Passage opens it, and an older Passage refuses a database written by a newer one, so back up the data directory before upgrading.
 
@@ -132,7 +132,7 @@ Management endpoints require `Authorization: Bearer <administrator-token>`:
 | GET | `/api/certificates` | List certificates with status, expiry and last error |
 | POST | `/api/certificates` | Order a certificate (`domains`, `challenge`: `http-01` or `dns-01`) |
 | POST | `/api/certificates/{id}/renew` | Order a new certificate now |
-| DELETE | `/api/certificates/{id}` | Delete a certificate |
+| DELETE | `/api/certificates/{id}` | Delete a certificate (400 while an enabled HTTPS host relies on it) |
 | GET | `/api/routes` | List all hosts |
 | POST | `/api/routes` | Create a host |
 | PUT | `/api/routes/{id}` | Replace a host |
@@ -180,7 +180,7 @@ A hostname/path pair must be unique. Paths are preserved, not rewritten; a trail
 
 ```toml
 [admin]                         # dashboard and API, loopback only
-listen = "127.0.0.1:8080"
+listen = "127.0.0.1:8081"
 
 [http]
 listen = "0.0.0.0:80"
@@ -213,6 +213,10 @@ The DNS hook is run directly, not through a shell, with three arguments:
 It must exit 0 once the record is published (Passage then waits `dns_propagation_secs`), and may be invoked twice for the same name with different values when a certificate covers both `example.com` and `*.example.com`. Make it executable, owned by root, and not writable by the service user.
 
 Try it without a public domain by pointing `directory_url` at a private ACME server and `ca_certificate` at its root; `tests/fake_acme.py` is such a server.
+
+Certificate private keys and the ACME account key are stored unencrypted in `passage.sqlite`; they are protected only by the `0700` data directory, so treat backups of it as secrets.
+
+A certificate cannot be deleted while an enabled host with HTTPS relies on it; turn HTTPS off on that host first. A host with HTTPS enabled and no covering certificate gets one ordered automatically.
 
 ## SSO integration
 

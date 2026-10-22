@@ -487,6 +487,9 @@ def https_is_enabled_from_a_route_and_served_by_sni(env):
     p.start()
     assert wait_for(lambda: presented_serial_or_none(p, 'shop.acme.test', ca)) == shop['serialNumber']
     assert len(env.acme.issued) == issued, 'a restart must not order certificates again'
+    in_use = p.certificate_for('shop.acme.test')
+    status, _, body = p.api('/certificates/' + in_use['id'], 'DELETE')
+    assert status == 400 and 'shop.acme.test' in json.loads(body)['error'], (status, body)
     for route_id in route_ids:
         p.delete_route(route_id)
     remove_certificates(p)

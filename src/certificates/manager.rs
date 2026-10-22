@@ -4,30 +4,38 @@ use super::{Certificate, Certificates, material::load, now};
 use async_trait::async_trait;
 use pingora::{server::ShutdownWatch, services::background::BackgroundService};
 use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex, PoisonError},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
+    sync::{Arc, PoisonError},
     time::Duration,
 };
-use tokio::time::{Instant, MissedTickBehavior, interval_at};
+use tokio::{
+    net::TcpStream,
+    task::JoinSet,
+    time::{Instant, MissedTickBehavior, interval_at},
+};
 
 const CHECK_EVERY: Duration = Duration::from_secs(60);
 const MAX_ERROR_CHARS: usize = 500;
 
 /// Marks a certificate as being issued for as long as it lives.
-struct Busy<'a>(&'a Mutex<HashSet<String>>, String);
+struct Busy(Arc<Certificates>, String);
 
-impl<'a> Busy<'a> {
-    fn new(set: &'a Mutex<HashSet<String>>, id: &str) -> Self {
-        set.lock()
+impl Busy {
+    /// `None` when an issuance for this certificate is already running.
+    fn claim(certificates: &Arc<Certificates>, id: &str) -> Option<Self> {
+        let claimed = certificates
+            .issuing
+            .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id.to_string());
-        Self(set, id.to_string())
+        claimed.then(|| Self(certificates.clone(), id.to_string()))
     }
 }
 
-impl Drop for Busy<'_> {
+impl Drop for Busy {
     fn drop(&mut self) {
         self.0
+            .issuing
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&self.1);
@@ -35,8 +43,8 @@ impl Drop for Busy<'_> {
 }
 
 impl Certificates {
-    /// Starts an issuance for every certificate that is due.
-    pub(super) async fn process_due(&self) {
+    /// Starts an issuance for every certificate that is due and not already being issued.
+    fn start_due(self: &Arc<Self>, tasks: &mut JoinSet<()>, shutdown: &ShutdownWatch) {
         let Some(issuer) = &self.issuer else {
             return;
         };
@@ -50,17 +58,22 @@ impl Certificates {
         };
         let now = now();
         for item in stored {
-            if item.certificate.is_due(now, renew_before) {
-                self.issue_one(item.certificate).await;
+            let certificate = item.certificate;
+            if !certificate.is_due(now, renew_before) {
+                continue;
             }
+            let Some(busy) = Busy::claim(self, &certificate.id) else {
+                continue;
+            };
+            let shutdown = shutdown.clone();
+            tasks.spawn(async move { busy.0.issue_one(certificate, shutdown).await });
         }
     }
 
-    async fn issue_one(&self, certificate: Certificate) {
+    async fn issue_one(&self, certificate: Certificate, shutdown: ShutdownWatch) {
         let Some(issuer) = &self.issuer else {
             return;
         };
-        let _busy = Busy::new(&self.issuing, &certificate.id);
         tracing::info!(
             certificate = certificate.id,
             domains = ?certificate.domains,
@@ -68,12 +81,20 @@ impl Certificates {
         );
         let outcome = async {
             let issued = issuer
-                .issue(&certificate.domains, certificate.challenge)
+                .issue(
+                    &certificate.domains,
+                    certificate.challenge,
+                    shutdown.clone(),
+                )
                 .await?;
             let loaded = load(&issued.chain_pem, &issued.key_pem)?;
             anyhow::Ok((issued, loaded))
         }
         .await;
+        if outcome.is_err() && *shutdown.borrow() {
+            // Not a failure of the certificate: retry right away on the next start.
+            return;
+        }
 
         let _edit = self.edit.lock().await;
         // The certificate may have been deleted while the CA was working.
@@ -115,23 +136,57 @@ impl Certificates {
     }
 }
 
-pub struct CertificateManager(pub Arc<Certificates>);
+pub struct CertificateManager {
+    pub certificates: Arc<Certificates>,
+    /// The plain HTTP listener, which serves HTTP-01 proofs.
+    pub http: SocketAddr,
+}
 
 #[async_trait]
 impl BackgroundService for CertificateManager {
     async fn start(&self, mut shutdown: ShutdownWatch) {
+        tokio::select! {
+            _ = shutdown.changed() => return,
+            _ = wait_for_listener(self.http) => {}
+        }
+        let certificates = &self.certificates;
+        let mut tasks = JoinSet::new();
         let mut ticker = interval_at(Instant::now() + CHECK_EVERY, CHECK_EVERY);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
         loop {
-            tokio::select! {
-                _ = shutdown.changed() => return,
-                _ = self.0.process_due() => {}
+            if let Err(error) = certificates.request_missing().await {
+                tracing::error!(
+                    error = format!("{error:#}"),
+                    "cannot order missing certificates"
+                );
             }
+            certificates.start_due(&mut tasks, &shutdown);
             tokio::select! {
-                _ = shutdown.changed() => return,
+                _ = shutdown.changed() => break,
                 _ = ticker.tick() => {}
-                _ = self.0.wake.notified() => {}
+                _ = certificates.wake.notified() => {}
+                Some(_) = tasks.join_next() => {}
             }
         }
+        // Interrupted orders withdraw their proofs before the process exits.
+        while tasks.join_next().await.is_some() {}
     }
+}
+
+/// Waits a few seconds at most for the HTTP listener to accept connections.
+async fn wait_for_listener(mut address: SocketAddr) {
+    if address.ip().is_unspecified() {
+        address.set_ip(if address.is_ipv4() {
+            Ipv4Addr::LOCALHOST.into()
+        } else {
+            Ipv6Addr::LOCALHOST.into()
+        });
+    }
+    for _ in 0..50 {
+        if TcpStream::connect(address).await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    tracing::warn!(%address, "the HTTP listener is not answering; HTTP-01 validation may fail");
 }

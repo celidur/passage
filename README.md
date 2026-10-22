@@ -37,12 +37,12 @@ cargo build --locked
 ./target/debug/passage serve
 ```
 
-Open <http://127.0.0.1:8080> and paste the token from `data/admin.token`. The proxy listens on port 8081 with the default [passage.toml](passage.toml):
+Open <http://127.0.0.1:8081> and paste the token from `data/admin.token`. The proxy listens on port 8080 with the default [passage.toml](passage.toml):
 
 ```sh
 python3 -m http.server 9000 --bind 127.0.0.1 &   # an example upstream
 # In the dashboard: domain demo.local, path /, upstream http://127.0.0.1:9000
-curl -H 'Host: demo.local' http://127.0.0.1:8081/
+curl -H 'Host: demo.local' http://127.0.0.1:8080/
 ```
 
 To install on a Debian/Ubuntu server:
@@ -53,7 +53,7 @@ sudo ./scripts/install.sh ./target/release/passage
 sudo systemctl enable --now passage
 ```
 
-The administration interface only listens on loopback; reach it with `ssh -L 8080:127.0.0.1:8080 user@server`.
+The administration interface only listens on loopback; reach it with `ssh -L 8081:127.0.0.1:8081 user@server`.
 
 ## Documentation
 

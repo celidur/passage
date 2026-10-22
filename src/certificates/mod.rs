@@ -12,7 +12,7 @@ pub use manager::CertificateManager;
 pub use model::{Certificate, CertificateView, Challenge, NewCertificate, Status, covers};
 pub use sni::SniResolver;
 
-use crate::{config::Config, state::UpdateError, store::Store};
+use crate::{config::Config, routes::Route, state::UpdateError, store::Store};
 use acme::{Issuer, Settings};
 use anyhow::{Context, Result, ensure};
 use material::{CertifiedKey, load};
@@ -210,14 +210,13 @@ impl Certificates {
         Ok(self.view(certificate))
     }
 
-    /// Makes sure HTTPS can be served for `host`: a managed certificate already covers it, or one
-    /// is requested over HTTP-01, or the fallback certificate stands in.
-    pub async fn ensure_for(&self, host: &str) -> Result<()> {
+    /// Fails unless HTTPS can be served for `host`: a managed certificate covers it, one can be
+    /// ordered over HTTP-01, or the fallback certificate stands in. Changes nothing.
+    pub fn check_for(&self, host: &str) -> Result<()> {
         ensure!(
             self.features.enabled,
-            "HTTPS is not enabled on this server: add a [tls] section to passage.toml"
+            "HTTPS is not enabled on this server: add an [https] section to passage.toml"
         );
-        let _edit = self.edit.lock().await;
         let existing = self.store.certificates()?;
         if existing.iter().any(|s| s.certificate.covers_host(host)) {
             return Ok(());
@@ -229,16 +228,49 @@ impl Certificates {
             );
             return Ok(());
         }
-        let mut request = NewCertificate {
-            domains: vec![host.to_string()],
-            challenge: Challenge::Http01,
-        };
-        request
-            .validate()
-            .with_context(|| format!("cannot request a certificate for {host}"))?;
-        self.store
-            .save_certificate(&Self::new_record(request.domains, request.challenge))?;
-        self.wake.notify_one();
+        http_01_request(host).map(drop)
+    }
+
+    /// Orders a certificate for every enabled HTTPS route that no certificate covers yet.
+    pub async fn request_missing(&self) -> Result<()> {
+        if self.issuer.is_none() {
+            return Ok(());
+        }
+        let _edit = self.edit.lock().await;
+        let mut known: Vec<_> = self
+            .store
+            .certificates()?
+            .into_iter()
+            .map(|stored| stored.certificate)
+            .collect();
+        let mut requested = false;
+        for route in self.store.load()? {
+            let host = &route.input.host;
+            if !route.input.enabled
+                || !route.input.https.enabled
+                || known.iter().any(|c| c.covers_host(host))
+            {
+                continue;
+            }
+            match http_01_request(host) {
+                Ok(request) => {
+                    let certificate = Self::new_record(request.domains, request.challenge);
+                    self.store.save_certificate(&certificate)?;
+                    known.push(certificate);
+                    requested = true;
+                }
+                Err(error) => {
+                    tracing::debug!(
+                        host,
+                        error = format!("{error:#}"),
+                        "no certificate can be ordered"
+                    )
+                }
+            }
+        }
+        if requested {
+            self.wake.notify_one();
+        }
         Ok(())
     }
 
@@ -260,17 +292,45 @@ impl Certificates {
         Ok(self.view(certificate))
     }
 
-    pub async fn delete(&self, id: &str) -> Result<(), UpdateError> {
+    /// Deletes a certificate unless an enabled HTTPS route in `routes` would be left without one.
+    pub async fn delete(&self, id: &str, routes: &[Route]) -> Result<(), UpdateError> {
         let _edit = self.edit.lock().await;
-        if !self
+        let (target, others): (Vec<_>, Vec<_>) = self
             .store
-            .delete_certificate(id)
+            .certificates()
             .map_err(UpdateError::Storage)?
-        {
-            return Err(UpdateError::NotFound);
+            .into_iter()
+            .map(|stored| stored.certificate)
+            .partition(|certificate| certificate.id == id);
+        let target = target.first().ok_or(UpdateError::NotFound)?;
+        if let Some(route) = routes.iter().find(|route| {
+            let host = &route.input.host;
+            route.input.enabled
+                && route.input.https.enabled
+                && target.covers_host(host)
+                && !others.iter().any(|other| other.covers_host(host))
+        }) {
+            return Err(UpdateError::Invalid(anyhow::anyhow!(
+                "{} still uses this certificate; turn off HTTPS on that host first",
+                route.input.host
+            )));
         }
+        self.store
+            .delete_certificate(id)
+            .map_err(UpdateError::Storage)?;
         self.reload().map_err(UpdateError::Storage)
     }
+}
+
+fn http_01_request(host: &str) -> Result<NewCertificate> {
+    let mut request = NewCertificate {
+        domains: vec![host.to_string()],
+        challenge: Challenge::Http01,
+    };
+    request
+        .validate()
+        .with_context(|| format!("cannot request a certificate for {host}"))?;
+    Ok(request)
 }
 
 fn load_static(certificate: &Path, key: &Path) -> Result<Arc<CertifiedKey>> {

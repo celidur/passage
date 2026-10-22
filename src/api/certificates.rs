@@ -46,6 +46,6 @@ async fn remove(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
-    state.certificates.delete(&id).await?;
+    state.delete_certificate(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

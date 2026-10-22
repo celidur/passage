@@ -215,7 +215,8 @@ mod tests {
     fn https_is_off_unless_a_section_is_set() {
         let config = parse("").unwrap();
         assert!(config.https.is_none());
-        assert_eq!(config.http.listen.port(), 8081);
+        assert_eq!(config.http.listen.port(), 8080);
+        assert_eq!(config.admin.listen.port(), 8081);
         let config = parse(HTTPS).unwrap().https.unwrap();
         assert!(
             config.certificate.is_none(),
@@ -228,7 +229,7 @@ mod tests {
     fn listeners_need_distinct_ports() {
         assert!(parse("[https]\nlisten = \"0.0.0.0:8081\"\n").is_err());
         assert!(parse("[https]\nlisten = \"0.0.0.0:8080\"\n").is_err());
-        assert!(parse("[http]\nlisten = \"0.0.0.0:8080\"\n").is_err());
+        assert!(parse("[http]\nlisten = \"0.0.0.0:8081\"\n").is_err());
     }
 
     #[test]

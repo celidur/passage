@@ -26,5 +26,5 @@ fi
 systemctl daemon-reload
 printf '%s\n' 'Installed. Existing configuration and data were preserved.' \
     'Start: sudo systemctl enable --now passage' \
-    'Dashboard: ssh -L 8080:127.0.0.1:8080 user@server, then open http://127.0.0.1:8080' \
+    'Dashboard: ssh -L 8081:127.0.0.1:8081 user@server, then open http://127.0.0.1:8081' \
     'Token: sudo cat /var/lib/passage/admin.token'

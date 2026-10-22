@@ -8,7 +8,10 @@ use instant_acme::{
     OrderStatus, RetryPolicy,
 };
 use std::{path::PathBuf, process::Stdio, sync::Arc, time::Duration};
-use tokio::{process::Command, sync::Mutex};
+use tokio::{
+    process::Command,
+    sync::{Mutex, watch},
+};
 
 const HOOK_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -81,7 +84,13 @@ impl Issuer {
     }
 
     /// Runs a complete order for `domains` and returns the chain with its new private key.
-    pub async fn issue(&self, domains: &[String], kind: Kind) -> Result<Issued> {
+    /// Shutdown interrupts it; published proofs are withdrawn either way.
+    pub async fn issue(
+        &self,
+        domains: &[String],
+        kind: Kind,
+        mut shutdown: watch::Receiver<bool>,
+    ) -> Result<Issued> {
         let account = self.account().await?;
         let identifiers: Vec<_> = domains.iter().cloned().map(Identifier::Dns).collect();
         let mut order = account
@@ -89,9 +98,10 @@ impl Issuer {
             .await
             .context("the certificate authority refused the order")?;
         let mut published = Published::default();
-        let result = self
-            .complete(&mut order, domains, kind, &mut published)
-            .await;
+        let result = tokio::select! {
+            result = self.complete(&mut order, domains, kind, &mut published) => result,
+            _ = shutdown.wait_for(|stop| *stop) => Err(anyhow!("interrupted by shutdown")),
+        };
         self.withdraw(published).await;
         result
     }
@@ -130,8 +140,9 @@ impl Issuer {
                         bail!("{name} is not a DNS name");
                     };
                     let (record, value) = (format!("_acme-challenge.{host}"), proof.dns_value());
+                    // Recorded first: a hook that fails halfway may still have created it.
+                    published.records.push((record.clone(), value.clone()));
                     self.run_hook("present", &record, &value).await?;
-                    published.records.push((record, value));
                 }
             }
             pending += 1;

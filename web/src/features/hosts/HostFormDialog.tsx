@@ -19,7 +19,7 @@ type Props = {
 /** What enabling HTTPS will do, given how the server is configured. */
 function httpsHint(https: Status['https'] | undefined) {
   if (!https) return '';
-  if (!https.enabled) return 'Add a [tls] section to passage.toml to serve HTTPS.';
+  if (!https.enabled) return 'Add an [https] section to passage.toml to serve HTTPS.';
   if (!https.acme) {
     return 'Automatic certificates are not configured. A certificate must already cover this domain, or the fallback certificate is used.';
   }

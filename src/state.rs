@@ -70,14 +70,17 @@ impl AppState {
             .recompile(routes)
             .await
             .map_err(UpdateError::Invalid)?;
-        if let Change::Create(route) | Change::Update(route) = &change
-            && route.input.enabled
-            && route.input.https.enabled
-        {
-            // After validation, so an invalid route never triggers a certificate order.
+        let https_host = match &change {
+            Change::Create(route) | Change::Update(route)
+                if route.input.enabled && route.input.https.enabled =>
+            {
+                Some(route.input.host.as_str())
+            }
+            _ => None,
+        };
+        if let Some(host) = https_host {
             self.certificates
-                .ensure_for(&route.input.host)
-                .await
+                .check_for(host)
                 .map_err(UpdateError::Invalid)?;
         }
         self.store.apply(&change).map_err(UpdateError::Storage)?;
@@ -87,6 +90,22 @@ impl AppState {
             route_id = change.route_id(),
             "configuration updated"
         );
+        // Only once the route is saved, so a rejected change never leaves an order behind.
+        if https_host.is_some()
+            && let Err(error) = self.certificates.request_missing().await
+        {
+            tracing::error!(
+                error = format!("{error:#}"),
+                "cannot record the certificate order; the manager retries"
+            );
+        }
         Ok(())
+    }
+
+    /// Deletes a certificate unless a route still needs it; serialized with route changes.
+    pub async fn delete_certificate(&self, id: &str) -> Result<(), UpdateError> {
+        let _guard = self.writes.lock().await;
+        let routes = self.store.load().map_err(UpdateError::Storage)?;
+        self.certificates.delete(id, &routes).await
     }
 }

@@ -82,7 +82,10 @@ pub fn serve(config: Config) -> Result<()> {
     if state.certificates.features().acme {
         server.add_service(background_service(
             "certificates",
-            CertificateManager(state.certificates.clone()),
+            CertificateManager {
+                certificates: state.certificates.clone(),
+                http: config.http.listen,
+            },
         ));
     }
     server.add_service(background_service(

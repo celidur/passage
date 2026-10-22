@@ -54,7 +54,7 @@ export function CertificatesPage({certificates, https}: Props) {
         <div className="warning" role="status">
           <Lock size={16} />
           <p>
-            No HTTPS listener is configured. Add a <code>[tls]</code> section to <code>passage.toml</code> to serve HTTPS.
+            No HTTPS listener is configured. Add an <code>[https]</code> section to <code>passage.toml</code> to serve HTTPS.
           </p>
         </div>
       )}

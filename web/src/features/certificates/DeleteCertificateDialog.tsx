@@ -15,8 +15,8 @@ export function DeleteCertificateDialog({certificate, onConfirm, onClose}: Props
     <Dialog titleId="delete-certificate-title">
       <h2 id="delete-certificate-title">Delete the certificate for {certificate.domains[0]}?</h2>
       <p>
-        Browsers will stop getting it at the next connection. Hosts with HTTPS enabled order a new one the next time
-        they are saved.
+        Browsers will stop getting it at the next connection. A certificate still used by a host with HTTPS enabled
+        cannot be deleted.
       </p>
       <ErrorMessage>{error}</ErrorMessage>
       <div className="dialog-foot">
