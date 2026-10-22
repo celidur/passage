@@ -1,6 +1,6 @@
 import {useState, type FormEvent} from 'react';
 import {ArrowRight, X} from 'lucide-react';
-import type {Route, RouteInput} from '../../api/types';
+import type {Route, RouteInput, Status} from '../../api/types';
 import {ErrorMessage} from '../../components/Alert';
 import {Dialog} from '../../components/Dialog';
 import {useAsyncAction} from '../../hooks/useAsyncAction';
@@ -10,11 +10,23 @@ import {PolicyFields} from './PolicyFields';
 type Props = {
   /** `null` creates a new host. */
   route: Route | null;
+  /** What the server can do about HTTPS; unknown until the status has loaded. */
+  https: Status['https'] | undefined;
   onSave: (input: RouteInput) => Promise<void>;
   onClose: () => void;
 };
 
-export function HostFormDialog({route, onSave, onClose}: Props) {
+/** What enabling HTTPS will do, given how the server is configured. */
+function httpsHint(https: Status['https'] | undefined) {
+  if (!https) return '';
+  if (!https.enabled) return 'Add a [tls] section to passage.toml to serve HTTPS.';
+  if (!https.acme) {
+    return 'Automatic certificates are not configured. A certificate must already cover this domain, or the fallback certificate is used.';
+  }
+  return 'A certificate is requested for this domain (HTTP-01) and renewed automatically. The domain must point to this server, and port 80 must reach Passage.';
+}
+
+export function HostFormDialog({route, https, onSave, onClose}: Props) {
   const [form, setForm] = useState<HostForm>(() => (route ? toForm(route) : EMPTY_HOST_FORM));
   const {busy, error, run} = useAsyncAction();
   const update = (patch: Partial<HostForm>) => setForm((current) => ({...current, ...patch}));
@@ -93,6 +105,28 @@ export function HostFormDialog({route, onSave, onClose}: Props) {
           <input type="checkbox" checked={form.enabled} onChange={(e) => update({enabled: e.target.checked})} />
           Enable this host
         </label>
+        <div className="https-section">
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={form.https.enabled}
+              disabled={https?.enabled === false}
+              onChange={(e) => update({https: {enabled: e.target.checked, redirect: e.target.checked && form.https.redirect}})}
+            />
+            Serve over HTTPS <span className="hint">AUTOMATIC CERTIFICATE</span>
+          </label>
+          {form.https.enabled && (
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={form.https.redirect}
+                onChange={(e) => update({https: {...form.https, redirect: e.target.checked}})}
+              />
+              Redirect HTTP to HTTPS
+            </label>
+          )}
+          <small>{httpsHint(https)}</small>
+        </div>
         <details className="advanced">
           <summary>Advanced: balancing, timeouts, limits and health</summary>
           <PolicyFields policy={form.policy} onChange={(policy) => update({policy})} />

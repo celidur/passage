@@ -21,6 +21,8 @@ pub struct CompiledRoute {
     pub limits: Limits,
     pub retries: u32,
     pub forward_auth_url: Option<String>,
+    /// Plain HTTP requests are redirected to HTTPS.
+    pub redirect_https: bool,
 }
 
 /// Immutable routing table, swapped atomically on every configuration change.
@@ -114,6 +116,7 @@ impl Snapshot {
                     limits: input.policy.limits,
                     retries: input.policy.retries,
                     forward_auth_url: input.forward_auth_url,
+                    redirect_https: input.https.redirect,
                 }));
         }
         for routes in by_host.values_mut() {
@@ -157,7 +160,7 @@ fn matches_prefix(prefix: &str, path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::routes::{Policy, RouteInput};
+    use crate::routes::{Https, Policy, RouteInput};
 
     fn route(host: &str, path: &str) -> Route {
         Route {
@@ -169,6 +172,7 @@ mod tests {
                 upstreams: vec!["http://127.0.0.1:9000".into()],
                 enabled: true,
                 forward_auth_url: None,
+                https: Https::default(),
                 policy: Policy::default(),
             },
         }

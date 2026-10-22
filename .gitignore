@@ -7,3 +7,5 @@ data/
 __pycache__/
 
 web/dist/
+
+.DS_Store

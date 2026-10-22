@@ -1,6 +1,6 @@
 //! `/api/status` handler.
 
-use crate::state::AppState;
+use crate::{certificates::HttpsFeatures, state::AppState};
 use axum::{Json, Router, extract::State, routing::get};
 use serde::Serialize;
 use std::sync::Arc;
@@ -13,6 +13,7 @@ struct Status {
     routes: usize,
     requests: u64,
     failures: u64,
+    https: HttpsFeatures,
 }
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -27,5 +28,6 @@ async fn status(State(state): State<Arc<AppState>>) -> Json<Status> {
         routes: state.snapshot.load().active_routes(),
         requests: state.metrics.requests(),
         failures: state.metrics.failures(),
+        https: state.certificates.features().clone(),
     })
 }

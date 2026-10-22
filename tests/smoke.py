@@ -14,6 +14,7 @@ import ssl
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -21,6 +22,7 @@ from pathlib import Path
 
 from harness import (ClosingServer, EchoUpstream, FakeAuth, Passage, WebSocket, free_port, request,
                      self_signed_certificate, serve, stop, wait_for)
+from fake_acme import FakeAcme
 
 
 class Environment:
@@ -33,7 +35,8 @@ class Environment:
         self.upstream = serve(EchoUpstream)
         self.tls_upstream = serve(EchoUpstream, tls_context)
         self.auth = serve(FakeAuth)
-        self.passage = Passage(binary, directory, self.cert, key)
+        self.acme = FakeAcme(directory)
+        self.passage = Passage(binary, directory, self.cert, key, self.acme)
 
     @staticmethod
     def url(server, scheme='http'):
@@ -55,6 +58,7 @@ class Environment:
 
     def close(self):
         self.passage.close()
+        self.acme.close()
         for server in (self.upstream, self.tls_upstream, self.auth):
             server.shutdown()
 
@@ -444,6 +448,164 @@ def http2_clients_are_accepted(env):
     p.delete_route(route_id)
 
 
+def wait_certificate(p, domain, status='valid', timeout=40):
+    return wait_for(lambda: (c := p.certificate_for(domain)) and c['status'] == status and c,
+                    timeout=timeout, message=f'certificate for {domain} never became {status}: '
+                    f'{p.certificate_for(domain)}')
+
+
+def presented_serial(p, name, ca):
+    return p.peer_certificate(name, ca)['serialNumber']
+
+
+def remove_certificates(p):
+    for certificate in p.certificates():
+        assert p.api('/certificates/' + certificate['id'], 'DELETE')[0] == 204
+
+
+def https_is_enabled_from_a_route_and_served_by_sni(env):
+    """enabling HTTPS on a host orders its certificate; each name is served its own, live and after restart"""
+    p, ca = env.passage, env.acme.ca_cert
+    hosts = ['shop.acme.test', 'blog.acme.test']
+    route_ids = [p.create_route(**env.route(host, https={'enabled': True})) for host in hosts]
+    for host in hosts:
+        certificate = wait_certificate(p, host)
+        assert certificate['domains'] == [host] and certificate['challenge'] == 'http-01'
+        assert certificate['not_after'] > time.time() and certificate['last_error'] is None
+    shop, blog = (p.peer_certificate(host, ca) for host in hosts)
+    assert ('DNS', 'shop.acme.test') in shop['subjectAltName']
+    assert ('DNS', 'shop.acme.test') not in blog['subjectAltName']
+    assert shop['serialNumber'] != blog['serialNumber']
+
+    status, body = p.https_get('shop.acme.test', ca, '/hello')
+    assert status == 200 and json.loads(body)['path'] == '/hello'
+    fallback = p.peer_certificate('unknown.acme.test')['pem']
+    assert fallback.strip() == env.cert.read_text().strip(), 'unknown names get the fallback certificate'
+
+    issued = len(env.acme.issued)
+    p.stop()
+    p.start()
+    assert wait_for(lambda: presented_serial_or_none(p, 'shop.acme.test', ca)) == shop['serialNumber']
+    assert len(env.acme.issued) == issued, 'a restart must not order certificates again'
+    for route_id in route_ids:
+        p.delete_route(route_id)
+    remove_certificates(p)
+
+
+def presented_serial_or_none(p, name, ca):
+    try:
+        return presented_serial(p, name, ca)
+    except OSError:  # the listener is not up yet
+        return None
+
+
+def plain_http_redirects_to_https_when_asked(env):
+    """redirect sends HTTP to HTTPS with path and query, yet the CA's proof is still served over HTTP"""
+    p = env.passage
+    redirect = p.create_route(**env.route('redirect.acme.test', https={'enabled': True, 'redirect': True}))
+    plain = p.create_route(**env.route('plain.acme.test'))
+    status, headers, _ = p.get('redirect.acme.test', '/a/b?x=1')
+    assert status == 308
+    assert headers['location'] == f'https://redirect.acme.test:{p.tls_port}/a/b?x=1', headers
+    assert p.get('plain.acme.test')[0] == 200, 'hosts without redirect stay on HTTP'
+    # Validation fetched the proof over HTTP from a host that redirects everything else.
+    wait_certificate(p, 'redirect.acme.test')
+    for route_id in (redirect, plain):
+        p.delete_route(route_id)
+    remove_certificates(p)
+
+
+def renewal_replaces_the_certificate_without_dropping_traffic(env):
+    """a renewed certificate is served from the next handshake on, while requests keep succeeding"""
+    p, ca, host = env.passage, env.acme.ca_cert, 'renew.acme.test'
+    route_id = p.create_route(**env.route(host, https={'enabled': True}))
+    certificate = wait_certificate(p, host)
+    before = presented_serial(p, host, ca)
+
+    results, running = [], threading.Event()
+    running.set()
+
+    def hammer():
+        while running.is_set():
+            try:
+                results.append(p.https_get(host, ca)[0])
+            except Exception as error:  # a failed handshake is a dropped request
+                results.append(repr(error))
+
+    thread = threading.Thread(target=hammer)
+    thread.start()
+    try:
+        status, _, body = p.api('/certificates/' + certificate['id'] + '/renew', 'POST')
+        assert status == 200, (status, body)
+        wait_for(lambda: presented_serial(p, host, ca) != before, timeout=40,
+                 message='the renewed certificate was never served')
+        time.sleep(0.5)
+    finally:
+        running.clear()
+        thread.join()
+    assert len(results) > 20 and set(results) == {200}, Counter(results)
+    assert p.certificate_for(host)['last_error'] is None
+    p.delete_route(route_id)
+    remove_certificates(p)
+
+
+def wildcard_certificates_use_the_dns_hook(env):
+    """a wildcard certificate proves control through the DNS hook, then covers new hosts without orders"""
+    p, ca = env.passage, env.acme.ca_cert
+    body = {'domains': ['*.wild.acme.test', 'wild.acme.test'], 'challenge': 'dns-01'}
+    assert p.api('/certificates', 'POST', {**body, 'challenge': 'http-01'})[0] == 400, 'wildcards need dns-01'
+    status, _, data = p.api('/certificates', 'POST', body)
+    assert status == 201, (status, data)
+    certificate = wait_certificate(p, 'wild.acme.test')
+    assert certificate['challenge'] == 'dns-01'
+    assert sorted(env.acme.issued[-1]['names']) == ['*.wild.acme.test', 'wild.acme.test']
+    assert env.acme.dns_records() == set(), 'the hook must remove its records afterwards'
+    assert p.api('/certificates', 'POST', body)[0] == 400, 'the same domains cannot be ordered twice'
+
+    orders = len(env.acme.issued)
+    route_id = p.create_route(**env.route('www.wild.acme.test', https={'enabled': True}))
+    assert len(p.certificates()) == 1 and len(env.acme.issued) == orders
+    assert ('DNS', '*.wild.acme.test') in p.peer_certificate('www.wild.acme.test', ca)['subjectAltName']
+    assert p.https_get('www.wild.acme.test', ca)[0] == 200
+    p.delete_route(route_id)
+    remove_certificates(p)
+
+
+def certificate_failures_are_reported_and_can_be_retried(env):
+    """a refused order shows the CA's reason and a retry time, and a manual renewal recovers"""
+    p, host = env.passage, 'broken.acme.test'
+    env.acme.failure = 'the CA could not reach this domain'
+    try:
+        route_id = p.create_route(**env.route(host, https={'enabled': True}))
+        failed = wait_certificate(p, host, 'failed')
+    finally:
+        env.acme.failure = None
+    assert 'the CA could not reach this domain' in failed['last_error'], failed
+    assert failed['failures'] == 1 and failed['next_attempt'] > time.time() + 60, failed
+    assert failed['not_after'] is None
+
+    status, _, data = p.api('/certificates/' + failed['id'] + '/renew', 'POST')
+    assert status == 200, (status, data)
+    recovered = wait_certificate(p, host)
+    assert recovered['last_error'] is None and recovered['failures'] == 0
+    p.delete_route(route_id)
+    remove_certificates(p)
+
+
+def https_settings_are_validated(env):
+    """HTTPS needs a public name, redirects need HTTPS, and certificate requests are checked"""
+    p = env.passage
+    body = env.route('valid.acme.test')
+    assert p.api('/routes', 'POST', {**body, 'https': {'redirect': True}})[0] == 400
+    assert p.api('/routes', 'POST', {**env.route('intranet', https={'enabled': True})})[0] == 400
+    assert p.get('valid.acme.test')[0] == 404, 'a rejected route must not exist'
+    assert p.certificates() == [], 'a rejected route must not order a certificate'
+    for request_body in ({'domains': []}, {'domains': ['localhost']}, {'domains': ['a.test'], 'extra': 1}):
+        assert p.api('/certificates', 'POST', request_body)[0] in (400, 422), request_body
+    assert p.api('/certificates/missing', 'DELETE')[0] == 404
+    assert p.api('/certificates/missing/renew', 'POST')[0] == 404
+
+
 def load_burst_and_upstream_crash(env):
     """a burst is served completely; an upstream dying mid-burst costs at most a few requests"""
     p = env.passage
@@ -500,6 +662,12 @@ SCENARIOS = [
     silent_streams_and_websockets_follow_read_timeout,
     http2_clients_are_accepted,
     load_burst_and_upstream_crash,
+    https_settings_are_validated,
+    https_is_enabled_from_a_route_and_served_by_sni,
+    plain_http_redirects_to_https_when_asked,
+    renewal_replaces_the_certificate_without_dropping_traffic,
+    wildcard_certificates_use_the_dns_hook,
+    certificate_failures_are_reported_and_can_be_retried,
 ]
 
 

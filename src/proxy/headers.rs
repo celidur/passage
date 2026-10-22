@@ -1,5 +1,6 @@
 //! Helpers for reading the downstream request and writing short responses.
 
+use bytes::Bytes;
 use pingora::{http::ResponseHeader, prelude::*};
 
 /// Client-supplied identity or forwarding metadata is never trusted.
@@ -74,9 +75,54 @@ pub async fn respond(session: &mut Session, status: u16, location: Option<&[u8]>
     Ok(true)
 }
 
+/// Writes a short plain-text response and reports the request as handled.
+pub async fn respond_text(session: &mut Session, status: u16, body: &str) -> Result<bool> {
+    let mut header = ResponseHeader::build(status, None)?;
+    header.insert_header("content-type", "text/plain")?;
+    header.insert_header("content-length", body.len().to_string())?;
+    header.insert_header("cache-control", "no-store")?;
+    session
+        .write_response_header(Box::new(header), false)
+        .await?;
+    session
+        .write_response_body(Some(Bytes::copy_from_slice(body.as_bytes())), true)
+        .await?;
+    Ok(true)
+}
+
+/// The HTTPS URL for a request, for redirecting plain HTTP. The port is left out when it is 443.
+pub fn https_location(authority: &str, path_and_query: &str, port: u16) -> Option<String> {
+    let host = authority
+        .parse::<http::uri::Authority>()
+        .ok()?
+        .host()
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
+    let port = if port == 443 {
+        String::new()
+    } else {
+        format!(":{port}")
+    };
+    Some(format!("https://{host}{port}{path_and_query}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirect_targets_keep_path_and_query() {
+        let location = |authority, path, port| https_location(authority, path, port);
+        assert_eq!(
+            location("App.Example.com:80", "/a/b?x=1", 443).as_deref(),
+            Some("https://app.example.com/a/b?x=1")
+        );
+        assert_eq!(
+            location("app.example.com.", "/", 8443).as_deref(),
+            Some("https://app.example.com:8443/")
+        );
+        assert!(location("bad host", "/", 443).is_none());
+    }
 
     #[test]
     fn identity_and_forwarding_headers_are_untrusted() {

@@ -58,23 +58,35 @@ aside {
   color: #70836f;
   margin: 0 12px 13px;
 }
-.nav-active {
-  display: flex;
-  align-items: center;
+.nav-item {
+  width: 100%;
+  justify-content: flex-start;
   gap: 12px;
   font-size: 12px;
   padding: 13px 12px;
-  color: #dcedc4;
-  background: #25362a;
-  border: 1px solid #344a32;
+  margin-bottom: 4px;
+  color: #91a284;
+  background: none;
+  border: 1px solid transparent;
   border-radius: 7px;
 }
-.nav-active > span {
+.nav-item:hover {
+  color: #dcedc4;
+}
+.nav-item.active {
+  color: #dcedc4;
+  background: #25362a;
+  border-color: #344a32;
+}
+.nav-item > span {
   margin-left: auto;
-  background: #3a4b33;
+  background: #2b3a2c;
   padding: 2px 6px;
   border-radius: 3px;
   font-size: 10px;
+}
+.nav-item.active > span {
+  background: #3a4b33;
 }
 .sidebar-note {
   margin-top: auto;
@@ -208,10 +220,18 @@ header b {
   }
   .workspace,
   .nav-label,
-  .nav-active,
   .sidebar-note,
   .engine {
     display: none;
+  }
+  nav {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .nav-item {
+    margin: 0;
+    padding: 10px;
   }
   .logout {
     position: absolute;

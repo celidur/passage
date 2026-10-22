@@ -21,7 +21,19 @@ pub struct RouteInput {
     #[serde(default)]
     pub forward_auth_url: Option<String>,
     #[serde(default)]
+    pub https: Https,
+    #[serde(default)]
     pub policy: Policy,
+}
+
+/// HTTPS for a host: a certificate is obtained and renewed automatically, and plain HTTP
+/// requests can be redirected to it. Routes stay reachable on both listeners either way.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Https {
+    pub enabled: bool,
+    /// Answer plain HTTP requests with a redirect to HTTPS.
+    pub redirect: bool,
 }
 
 fn root_path() -> String {
@@ -62,6 +74,10 @@ impl RouteInput {
             "upstreams must be distinct"
         );
         self.policy.validate()?;
+        ensure!(
+            self.https.enabled || !self.https.redirect,
+            "redirecting to HTTPS requires HTTPS to be enabled"
+        );
         self.forward_auth_url = match self.forward_auth_url.as_deref().map(str::trim) {
             None | Some("") => None,
             Some(auth) => Some(endpoint(auth)?.to_string()),
@@ -71,7 +87,7 @@ impl RouteInput {
 }
 
 /// Exact DNS hostnames only; wildcards and ports are intentionally unsupported for now.
-fn normalize_host(value: &str) -> Result<String> {
+pub(crate) fn normalize_host(value: &str) -> Result<String> {
     let value = value.trim().trim_end_matches('.').to_ascii_lowercase();
     ensure!(
         !value.is_empty() && value.len() <= 253,
@@ -137,6 +153,7 @@ mod tests {
             upstreams: vec!["http://127.0.0.1:9000/".into()],
             enabled: true,
             forward_auth_url: Some("  ".into()),
+            https: Https::default(),
             policy: Policy::default(),
         }
     }
@@ -182,6 +199,16 @@ mod tests {
         };
         route.policy.health.check = Some(check);
         assert!(route.validate().is_err(), "timeout above interval");
+    }
+
+    #[test]
+    fn redirecting_needs_https_and_defaults_are_off() {
+        let mut route = input("/");
+        assert_eq!(route.https, Https::default());
+        route.https.redirect = true;
+        assert!(route.validate().is_err());
+        route.https.enabled = true;
+        assert!(route.validate().is_ok());
     }
 
     #[test]

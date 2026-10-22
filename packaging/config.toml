@@ -1,11 +1,24 @@
-proxy_listen = "0.0.0.0:80"
-admin_listen = "127.0.0.1:8080"
+[general]
 data_dir = "/var/lib/passage"
 # How often upstream host names are looked up again, in seconds.
 # dns_refresh_secs = 30
 
-# Optional existing TLS certificate (one certificate for the whole listener):
-# [tls]
+# Dashboard and API; loopback only.
+[admin]
+listen = "127.0.0.1:8080"
+
+[http]
+listen = "0.0.0.0:80"
+
+# Uncomment to serve HTTPS, with a certificate per domain chosen by SNI.
+# [https]
 # listen = "0.0.0.0:443"
+# Optional fallback certificate for unknown names and clients without SNI.
 # certificate = "/etc/passage/tls/fullchain.pem"
 # private_key = "/etc/passage/tls/privkey.pem"
+
+# Automatic certificates from Let's Encrypt. Needs [https] and port 80 reachable from the internet.
+# [acme]
+# email = "admin@example.com"
+# terms_agreed = true
+# dns_hook = "/etc/passage/dns-hook"    # enables DNS-01 and wildcard certificates

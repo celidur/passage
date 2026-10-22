@@ -1,12 +1,25 @@
-# Development defaults; administration is always loopback-only in v0.1.
-proxy_listen = "0.0.0.0:8081"
-admin_listen = "127.0.0.1:8080"
+# Development defaults.
+[general]
 data_dir = "./data"
 # How often upstream host names are looked up again, in seconds.
 # dns_refresh_secs = 30
 
-# Optional inbound TLS using an existing certificate. Restart after replacement.
-# [tls]
+# Dashboard and API; loopback only.
+[admin]
+listen = "127.0.0.1:8080"
+
+[http]
+listen = "0.0.0.0:8081"
+
+# Uncomment to serve HTTPS, with a certificate per domain chosen by SNI.
+# [https]
 # listen = "0.0.0.0:8443"
+# Optional fallback certificate for unknown names and clients without SNI; read at startup.
 # certificate = "/etc/passage/tls/fullchain.pem"
 # private_key = "/etc/passage/tls/privkey.pem"
+
+# Automatic certificates. Needs [https], port 80 reachable for HTTP-01, and accepted terms.
+# [acme]
+# email = "admin@example.com"
+# terms_agreed = true
+# dns_hook = "/etc/passage/dns-hook"    # enables DNS-01 and wildcard certificates

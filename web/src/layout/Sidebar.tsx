@@ -1,12 +1,20 @@
-import {LogOut, Network, Server, ShieldCheck} from 'lucide-react';
+import {Lock, LogOut, Network, Server, ShieldCheck} from 'lucide-react';
+import {PAGE_TITLES, type Page} from './pages';
 
 type Props = {
+  page: Page;
+  onNavigate: (page: Page) => void;
   version?: string;
   hostCount: number;
+  certificateCount: number;
   onLock: () => void;
 };
 
-export function Sidebar({version, hostCount, onLock}: Props) {
+export function Sidebar({page, onNavigate, version, hostCount, certificateCount, onLock}: Props) {
+  const items = [
+    {page: 'hosts' as const, icon: <Network size={18} />, count: hostCount},
+    {page: 'certificates' as const, icon: <Lock size={18} />, count: certificateCount},
+  ];
   return (
     <aside>
       <a className="brand" href="/">
@@ -24,10 +32,18 @@ export function Sidebar({version, hostCount, onLock}: Props) {
       </div>
       <nav>
         <div className="nav-label">WORKSPACE</div>
-        <div className="nav-active">
-          <Network size={18} />
-          Proxy hosts<span>{hostCount}</span>
-        </div>
+        {items.map((item) => (
+          <button
+            key={item.page}
+            className={item.page === page ? 'nav-item active' : 'nav-item'}
+            aria-current={item.page === page ? 'page' : undefined}
+            onClick={() => onNavigate(item.page)}
+          >
+            {item.icon}
+            {PAGE_TITLES[item.page]}
+            <span>{item.count}</span>
+          </button>
+        ))}
       </nav>
       <div className="sidebar-note">
         <ShieldCheck size={19} />

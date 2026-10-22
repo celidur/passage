@@ -53,6 +53,18 @@ def request(port, path, method='GET', body=None, headers=None, context=None, tim
         connection.close()
 
 
+class SniConnection(http.client.HTTPSConnection):
+    """Connects to 127.0.0.1 but announces `server_name` in the TLS handshake and verifies it."""
+
+    def __init__(self, port, server_name, context, timeout=5):
+        super().__init__('127.0.0.1', port, context=context, timeout=timeout)
+        self.server_name = server_name
+
+    def connect(self):
+        http.client.HTTPConnection.connect(self)
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.server_name)
+
+
 def read_frame(stream):
     """Reads one WebSocket frame and returns (opcode, payload), or None at end of stream."""
     head = stream.read(2)
@@ -267,18 +279,26 @@ def self_signed_certificate(directory: Path):
 class Passage:
     """A Passage process on ephemeral ports with its own data directory."""
 
-    def __init__(self, binary: str, directory: Path, cert: Path, key: Path):
+    def __init__(self, binary: str, directory: Path, cert: Path, key: Path, acme=None):
         self.binary = binary
         self.admin_port, self.proxy_port, self.tls_port = free_port(), free_port(), free_port()
         self.data_dir = directory / 'data'
         self.config = directory / 'passage.toml'
-        self.config.write_text(
-            f'proxy_listen = "127.0.0.1:{self.proxy_port}"\n'
-            f'admin_listen = "127.0.0.1:{self.admin_port}"\n'
-            f'data_dir = "{self.data_dir}"\n'
-            f'[tls]\nlisten = "127.0.0.1:{self.tls_port}"\n'
+        text = (
+            f'[general]\ndata_dir = "{self.data_dir}"\n'
+            f'[admin]\nlisten = "127.0.0.1:{self.admin_port}"\n'
+            f'[http]\nlisten = "127.0.0.1:{self.proxy_port}"\n'
+            f'[https]\nlisten = "127.0.0.1:{self.tls_port}"\n'
             f'certificate = "{cert}"\nprivate_key = "{key}"\n'
         )
+        if acme:
+            acme.proxy_port = self.proxy_port
+            text += (
+                f'[acme]\nemail = "ops@example.test"\nterms_agreed = true\n'
+                f'directory_url = "{acme.directory_url}"\nca_certificate = "{acme.ca_cert}"\n'
+                f'dns_hook = "{acme.hook}"\ndns_propagation_secs = 0\n'
+            )
+        self.config.write_text(text)
         self.log = open(directory / 'server.log', 'w+')
         self.process = None
         self.token = None
@@ -345,6 +365,38 @@ class Passage:
         """Live state of a route (`active` requests and `backends`), from /api/upstreams."""
         routes = json.loads(self.api('/upstreams')[2])
         return next(r for r in routes if r['route_id'] == route_id)
+
+    def certificates(self) -> list:
+        return json.loads(self.api('/certificates')[2])
+
+    def certificate_for(self, domain):
+        """The managed certificate listing `domain` among its names, if any."""
+        return next((c for c in self.certificates() if domain in c['domains']), None)
+
+    def peer_certificate(self, server_name, cafile=None) -> dict:
+        """The certificate the HTTPS listener presents for an SNI name, verified against `cafile`.
+
+        Without `cafile` nothing is verified, and the certificate is returned as `{'pem': ...}`.
+        """
+        context = ssl.create_default_context(cafile=str(cafile)) if cafile else ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        if not cafile:
+            context.check_hostname, context.verify_mode = False, ssl.CERT_NONE
+        with socket.create_connection(('127.0.0.1', self.tls_port), timeout=5) as connection:
+            with context.wrap_socket(connection, server_hostname=server_name) as tls:
+                if cafile:
+                    return tls.getpeercert()
+                return {'pem': ssl.DER_cert_to_PEM_cert(tls.getpeercert(binary_form=True))}
+
+    def https_get(self, host, cafile, path='/', timeout=5):
+        """A GET over the HTTPS listener with SNI `host`, verified against `cafile`."""
+        context = ssl.create_default_context(cafile=str(cafile))
+        connection = SniConnection(self.tls_port, host, context, timeout)
+        try:
+            connection.request('GET', path, headers={'Host': host})
+            response = connection.getresponse()
+            return response.status, response.read()
+        finally:
+            connection.close()
 
     def get(self, host, path='/', headers=None, tls_context=None, timeout=5):
         port = self.tls_port if tls_context else self.proxy_port

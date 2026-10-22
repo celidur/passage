@@ -15,6 +15,14 @@ const MIGRATIONS: &[&str] = &[
          action TEXT NOT NULL,
          route_id TEXT NOT NULL
      );",
+    // 2: managed certificates (key and chain beside the record) and key/value settings.
+    "CREATE TABLE certificates (
+         id TEXT PRIMARY KEY,
+         document TEXT NOT NULL,
+         chain_pem TEXT,
+         key_pem TEXT
+     );
+     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
 ];
 
 /// Brings the database to the latest schema. Each migration runs in its own transaction
@@ -67,7 +75,10 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         run(&mut conn).unwrap();
         assert_eq!(version(&conn), MIGRATIONS.len() as i64);
-        assert_eq!(tables(&conn), ["audit", "routes"]);
+        assert_eq!(
+            tables(&conn),
+            ["audit", "certificates", "routes", "settings"]
+        );
         run(&mut conn).unwrap();
     }
 

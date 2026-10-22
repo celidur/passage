@@ -11,7 +11,10 @@ use crate::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use forward_auth::{ForwardAuth, Identity};
-use headers::{client_ip, content_length, request_host, respond, scheme, strip_untrusted};
+use headers::{
+    client_ip, content_length, https_location, request_host, respond, respond_text, scheme,
+    strip_untrusted,
+};
 use pingora::{
     ErrorSource, ErrorType,
     http::{RequestHeader, ResponseHeader},
@@ -113,6 +116,12 @@ impl ProxyHttp for PassageProxy {
         let Some(path) = canonical_path(session.req_header().uri.path()) else {
             return respond(session, 400, None).await;
         };
+        // Certificate authorities fetch their HTTP-01 proofs here, whatever the Host.
+        if let Some(token) = path.strip_prefix("/.well-known/acme-challenge/")
+            && let Some(proof) = self.state.certificates.proofs.get(token)
+        {
+            return respond_text(session, 200, &proof).await;
+        }
         // Look up in one statement so the snapshot guard is not held across forward-auth.
         let route = self
             .state
@@ -124,6 +133,18 @@ impl ProxyHttp for PassageProxy {
         };
         strip_untrusted(session);
         ctx.route = Some(route.clone());
+
+        if route.redirect_https && scheme(session) == "http" {
+            let target = session
+                .req_header()
+                .uri
+                .path_and_query()
+                .map_or("/", |target| target.as_str());
+            let port = self.state.certificates.features().public_port;
+            if let Some(location) = https_location(request_host(session), target, port) {
+                return respond(session, 308, Some(location.as_bytes())).await;
+            }
+        }
 
         // Shed load before spending an authentication round trip on the request.
         let Some(slot) = route.pool.admit(route.limits.max_connections) else {

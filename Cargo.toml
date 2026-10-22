@@ -14,7 +14,9 @@ bytes = "1"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
 http = "1"
+instant-acme = "0.8"
 mime_guess = "2"
+openssl = "0.10"
 percent-encoding = "2"
 pingora = { version = "=0.9.0", features = ["proxy", "openssl"] }
 rand = "0.10"

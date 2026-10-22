@@ -1,4 +1,4 @@
-import type {Route, RouteInput, RouteUpstreams, Status} from './types';
+import type {Certificate, NewCertificate, Route, RouteInput, RouteUpstreams, Status} from './types';
 
 export class UnauthorizedError extends Error {}
 
@@ -27,6 +27,7 @@ export function createClient(token: string, onUnauthorized: (message: string) =>
   }
 
   const routePath = (id: string) => `/routes/${encodeURIComponent(id)}`;
+  const certificatePath = (id: string) => `/certificates/${encodeURIComponent(id)}`;
 
   return {
     status: () => request<Status>('/status'),
@@ -35,6 +36,10 @@ export function createClient(token: string, onUnauthorized: (message: string) =>
     createRoute: (input: RouteInput) => request<Route>('/routes', 'POST', input),
     updateRoute: (id: string, input: RouteInput) => request<Route>(routePath(id), 'PUT', input),
     deleteRoute: (id: string) => request<void>(routePath(id), 'DELETE'),
+    listCertificates: () => request<Certificate[]>('/certificates'),
+    createCertificate: (input: NewCertificate) => request<Certificate>('/certificates', 'POST', input),
+    renewCertificate: (id: string) => request<Certificate>(certificatePath(id) + '/renew', 'POST'),
+    deleteCertificate: (id: string) => request<void>(certificatePath(id), 'DELETE'),
   };
 }
 
