@@ -1,6 +1,9 @@
 //! `/api/routes` handlers.
 
-use super::error::{ApiError, ApiResult};
+use super::{
+    error::{ApiError, ApiResult},
+    json::JsonBody,
+};
 use crate::{
     routes::{Route, RouteInput},
     state::AppState,
@@ -26,7 +29,7 @@ async fn list(State(state): State<Arc<AppState>>) -> ApiResult<Json<Vec<Route>>>
 
 async fn create(
     State(state): State<Arc<AppState>>,
-    Json(mut input): Json<RouteInput>,
+    JsonBody(mut input): JsonBody<RouteInput>,
 ) -> ApiResult<(StatusCode, Json<Route>)> {
     input.validate().map_err(ApiError::bad_request)?;
     let route = Route {
@@ -40,7 +43,7 @@ async fn create(
 async fn update(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(mut input): Json<RouteInput>,
+    JsonBody(mut input): JsonBody<RouteInput>,
 ) -> ApiResult<Json<Route>> {
     input.validate().map_err(ApiError::bad_request)?;
     let route = Route { id, input };

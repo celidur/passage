@@ -1,14 +1,15 @@
 import {Network, Pencil, ShieldCheck, Trash2} from 'lucide-react';
-import type {Route} from '../../api/types';
+import type {Route, RouteUpstreams} from '../../api/types';
 import {isProtected} from './host';
 
 type Props = {
   routes: Route[];
+  upstreams: Record<string, RouteUpstreams>;
   onEdit: (route: Route) => void;
   onDelete: (route: Route) => void;
 };
 
-export function HostsTable({routes, onEdit, onDelete}: Props) {
+export function HostsTable({routes, upstreams, onEdit, onDelete}: Props) {
   return (
     <div className="table-scroll">
       <table>
@@ -25,7 +26,7 @@ export function HostsTable({routes, onEdit, onDelete}: Props) {
         </thead>
         <tbody>
           {routes.map((route) => (
-            <HostRow key={route.id} route={route} onEdit={onEdit} onDelete={onDelete} />
+            <HostRow key={route.id} route={route} live={upstreams[route.id]} onEdit={onEdit} onDelete={onDelete} />
           ))}
         </tbody>
       </table>
@@ -33,9 +34,25 @@ export function HostsTable({routes, onEdit, onDelete}: Props) {
   );
 }
 
-type RowProps = {route: Route; onEdit: (route: Route) => void; onDelete: (route: Route) => void};
+type RowProps = {
+  route: Route;
+  /** Live backends; absent while the route is disabled. */
+  live: RouteUpstreams | undefined;
+  onEdit: (route: Route) => void;
+  onDelete: (route: Route) => void;
+};
 
-function HostRow({route, onEdit, onDelete}: RowProps) {
+function UpstreamHealth({live}: {live: RouteUpstreams}) {
+  const healthy = live.backends.filter((backend) => backend.healthy).length;
+  const total = live.backends.length;
+  return (
+    <small className={total > 0 && healthy === total ? 'upstream-health' : 'upstream-health degraded'}>
+      {total === 0 ? 'No address resolved' : `${healthy} of ${total} addresses healthy`}
+    </small>
+  );
+}
+
+function HostRow({route, live, onEdit, onDelete}: RowProps) {
   const sso = isProtected(route);
   return (
     <tr>
@@ -54,7 +71,9 @@ function HostRow({route, onEdit, onDelete}: RowProps) {
         </div>
       </td>
       <td>
-        <code>{route.upstream}</code>
+        <code>{route.upstreams[0]}</code>
+        {route.upstreams.length > 1 && <small className="more">+{route.upstreams.length - 1} more</small>}
+        {live && <UpstreamHealth live={live} />}
       </td>
       <td>
         <span className={sso ? 'badge protected' : 'badge'}>

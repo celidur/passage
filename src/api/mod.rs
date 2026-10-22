@@ -2,9 +2,11 @@
 
 mod assets;
 mod error;
+mod json;
 mod middleware;
 mod routes;
 mod status;
+mod upstreams;
 
 use crate::state::AppState;
 use anyhow::Result;
@@ -23,6 +25,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     let api = Router::new()
         .merge(status::router())
         .merge(routes::router())
+        .merge(upstreams::router())
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::require_admin,

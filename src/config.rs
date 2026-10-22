@@ -11,6 +11,8 @@ pub struct Config {
     pub proxy_listen: SocketAddr,
     pub admin_listen: SocketAddr,
     pub data_dir: PathBuf,
+    /// How often upstream host names are looked up again.
+    pub dns_refresh_secs: u64,
     pub tls: Option<Tls>,
 }
 
@@ -28,6 +30,7 @@ impl Default for Config {
             proxy_listen: "0.0.0.0:8081".parse().unwrap(),
             admin_listen: "127.0.0.1:8080".parse().unwrap(),
             data_dir: "./data".into(),
+            dns_refresh_secs: 30,
             tls: None,
         }
     }
@@ -55,6 +58,10 @@ impl Config {
         ensure!(
             self.admin_listen.port() != self.proxy_listen.port(),
             "admin and proxy ports must differ"
+        );
+        ensure!(
+            (1..=86_400).contains(&self.dns_refresh_secs),
+            "dns_refresh_secs must be between 1 and 86400"
         );
         if let Some(tls) = &self.tls {
             ensure!(

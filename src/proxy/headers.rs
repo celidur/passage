@@ -34,6 +34,17 @@ pub fn request_host(session: &Session) -> &str {
         .unwrap_or_default()
 }
 
+pub fn content_length(session: &Session) -> Option<u64> {
+    session
+        .req_header()
+        .headers
+        .get(http::header::CONTENT_LENGTH)?
+        .to_str()
+        .ok()?
+        .parse()
+        .ok()
+}
+
 pub fn scheme(session: &Session) -> &'static str {
     let tls = session
         .as_downstream()

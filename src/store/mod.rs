@@ -1,3 +1,5 @@
+mod migrations;
+
 use crate::routes::Route;
 use anyhow::Result;
 use rusqlite::{Connection, params};
@@ -34,20 +36,10 @@ pub struct Store(Mutex<Connection>);
 
 impl Store {
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)?;
+        let mut conn = Connection::open(path)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-            PRAGMA synchronous=FULL;
-            CREATE TABLE IF NOT EXISTS routes (id TEXT PRIMARY KEY, document TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS audit (
-                id INTEGER PRIMARY KEY,
-                timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                action TEXT NOT NULL,
-                route_id TEXT NOT NULL
-            );
-            PRAGMA user_version=1;",
-        )?;
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;")?;
+        migrations::run(&mut conn)?;
         Ok(Self(Mutex::new(conn)))
     }
 
@@ -92,7 +84,7 @@ mod tests {
     fn route(id: &str, name: &str) -> Route {
         serde_json::from_value(serde_json::json!({
             "id": id, "name": name, "host": "app.local", "path_prefix": "/",
-            "upstream": "http://127.0.0.1:9000", "enabled": true
+            "upstreams": ["http://127.0.0.1:9000"], "enabled": true
         }))
         .unwrap()
     }

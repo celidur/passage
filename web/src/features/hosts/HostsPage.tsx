@@ -14,7 +14,7 @@ import './hosts.css';
 type Editing = {route: Route | null} | null;
 
 export function HostsPage({hosts}: {hosts: Hosts}) {
-  const {routes, status, loadError, refresh, save, remove} = hosts;
+  const {routes, upstreams, status, loadError, refresh, save, remove} = hosts;
   const [query, setQuery] = useState('');
   const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState<Editing>(null);
@@ -68,7 +68,7 @@ export function HostsPage({hosts}: {hosts: Hosts}) {
           </div>
         </div>
         {visible.length ? (
-          <HostsTable routes={visible} onEdit={openEditor} onDelete={setDeleting} />
+          <HostsTable routes={visible} upstreams={upstreams} onEdit={openEditor} onDelete={setDeleting} />
         ) : (
           <EmptyState searching={query !== ''} onAdd={() => openEditor(null)} />
         )}

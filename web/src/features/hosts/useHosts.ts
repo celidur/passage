@@ -1,21 +1,27 @@
 import {useCallback, useEffect, useState} from 'react';
 import type {ApiClient} from '../../api/client';
-import type {Route, RouteInput, Status} from '../../api/types';
+import type {Route, RouteInput, RouteUpstreams, Status} from '../../api/types';
 import {errorMessage} from '../../lib/format';
 
 const REFRESH_INTERVAL_MS = 10_000;
 
-/** Routes and gateway status, polled in the background and refreshed after every change. */
+/** Routes, live upstream health and gateway status, polled in the background and refreshed after every change. */
 export function useHosts(client: ApiClient) {
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [upstreams, setUpstreams] = useState<Record<string, RouteUpstreams>>({});
   const [status, setStatus] = useState<Status | null>(null);
   const [loadError, setLoadError] = useState('');
 
   const refresh = useCallback(async () => {
     try {
-      const [nextStatus, nextRoutes] = await Promise.all([client.status(), client.listRoutes()]);
+      const [nextStatus, nextRoutes, nextUpstreams] = await Promise.all([
+        client.status(),
+        client.listRoutes(),
+        client.upstreams(),
+      ]);
       setStatus(nextStatus);
       setRoutes(nextRoutes);
+      setUpstreams(Object.fromEntries(nextUpstreams.map((entry) => [entry.route_id, entry])));
       setLoadError('');
     } catch (e) {
       setLoadError(errorMessage(e));
@@ -45,7 +51,7 @@ export function useHosts(client: ApiClient) {
     [client, refresh],
   );
 
-  return {routes, status, loadError, refresh, save, remove};
+  return {routes, upstreams, status, loadError, refresh, save, remove};
 }
 
 export type Hosts = ReturnType<typeof useHosts>;

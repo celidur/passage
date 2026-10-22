@@ -1,14 +1,20 @@
 """Process and HTTP helpers for the smoke tests. Standard library only."""
+import base64
+import hashlib
 import http.client
 import http.server
 import json
 import os
 import socket
 import ssl
+import struct
 import subprocess
 import threading
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+WEBSOCKET_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 
 
 def free_port() -> int:
@@ -17,37 +23,170 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def request(port, path, method='GET', body=None, headers=None, context=None):
+def wait_for(condition, timeout=10.0, message='condition not met'):
+    """Polls `condition` until it returns a truthy value and returns it."""
+    deadline = time.monotonic() + timeout
+    while True:
+        value = condition()
+        if value:
+            return value
+        if time.monotonic() > deadline:
+            raise AssertionError(message)
+        time.sleep(0.1)
+
+
+def request(port, path, method='GET', body=None, headers=None, context=None, timeout=5, chunked=False):
     """Sends one request and returns (status, lowercase headers, body)."""
     if context:
-        connection = http.client.HTTPSConnection('127.0.0.1', port, timeout=5, context=context)
+        connection = http.client.HTTPSConnection('127.0.0.1', port, timeout=timeout, context=context)
     else:
-        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+        connection = http.client.HTTPConnection('127.0.0.1', port, timeout=timeout)
     headers = dict(headers or {})
-    if body is not None:
+    if isinstance(body, (dict, list)):
         body = json.dumps(body)
         headers['Content-Type'] = 'application/json'
     try:
-        connection.request(method, path, body=body, headers=headers)
+        connection.request(method, path, body=body, headers=headers, encode_chunked=chunked)
         response = connection.getresponse()
         return response.status, {k.lower(): v for k, v in response.getheaders()}, response.read()
     finally:
         connection.close()
 
 
-class EchoUpstream(http.server.BaseHTTPRequestHandler):
-    """Replies with the received path and headers as JSON."""
+def read_frame(stream):
+    """Reads one WebSocket frame and returns (opcode, payload), or None at end of stream."""
+    head = stream.read(2)
+    if len(head) < 2:
+        return None
+    opcode, masked, length = head[0] & 0x0F, head[1] & 0x80, head[1] & 0x7F
+    if length == 126:
+        length = struct.unpack('>H', stream.read(2))[0]
+    elif length == 127:
+        length = struct.unpack('>Q', stream.read(8))[0]
+    mask = stream.read(4) if masked else b''
+    data = stream.read(length)
+    if masked:
+        data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    return opcode, data
 
-    def do_GET(self):
-        payload = json.dumps({'path': self.path, 'headers': dict(self.headers)}).encode()
-        self.send_response(200)
-        self.send_header('Content-Length', str(len(payload)))
+
+def frame(opcode, data, mask=b''):
+    """Encodes a final WebSocket frame; clients must pass a 4-byte mask."""
+    flag = 0x80 if mask else 0
+    head = bytes([0x80 | opcode])
+    if len(data) < 126:
+        head += bytes([flag | len(data)])
+    elif len(data) < 65536:
+        head += bytes([flag | 126]) + struct.pack('>H', len(data))
+    else:
+        head += bytes([flag | 127]) + struct.pack('>Q', len(data))
+    if mask:
+        data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+    return head + mask + data
+
+
+class EchoUpstream(http.server.BaseHTTPRequestHandler):
+    """Replies with the received path and headers as JSON.
+
+    Special paths: `/health` (status follows `healthy`), `/slow?delay=N`, `/stream`
+    (close-delimited body in two parts) and WebSocket upgrades (echoes `echo:<text>`).
+    """
+
+    healthy = True
+
+    def reply(self, status, payload):
+        data = json.dumps(payload).encode()
+        self.send_response(status)
+        self.send_header('Content-Length', str(len(data)))
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        self.wfile.write(payload)
+        self.wfile.write(data)
+
+    def do_GET(self):
+        url = urlsplit(self.path)
+        if self.headers.get('Upgrade', '').lower() == 'websocket':
+            return self.websocket()
+        if url.path == '/health':
+            return self.reply(200 if self.healthy else 503, {'healthy': self.healthy})
+        if url.path == '/stream':
+            return self.stream()
+        if url.path == '/slow':
+            time.sleep(float(parse_qs(url.query)['delay'][0]))
+        self.reply(200, {'path': self.path, 'port': self.server.server_port, 'headers': dict(self.headers)})
+
+    def do_POST(self):
+        self.reply(200, {'received': self.read_body()})
+
+    def read_body(self) -> int:
+        if self.headers.get('Transfer-Encoding', '').lower() == 'chunked':
+            total = 0
+            while True:
+                size = int(self.rfile.readline().split(b';')[0], 16)
+                if size == 0:
+                    self.rfile.readline()
+                    return total
+                total += len(self.rfile.read(size))
+                self.rfile.readline()
+        return len(self.rfile.read(int(self.headers.get('Content-Length', 0))))
+
+    def stream(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.end_headers()
+        self.wfile.write(b'first\n')
+        time.sleep(1.5)
+        self.wfile.write(b'second\n')
+
+    def websocket(self):
+        key = self.headers['Sec-WebSocket-Key'] + WEBSOCKET_GUID
+        accept = base64.b64encode(hashlib.sha1(key.encode()).digest()).decode()
+        self.wfile.write(
+            b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+            + f'Sec-WebSocket-Accept: {accept}\r\n\r\n'.encode()
+        )
+        while (message := read_frame(self.rfile)) is not None:
+            opcode, data = message
+            if opcode == 0x8:
+                self.wfile.write(frame(0x8, b''))
+                return
+            self.wfile.write(frame(opcode, b'echo:' + data))
 
     def log_message(self, *_):
         pass
+
+
+class WebSocket:
+    """A minimal client: performs the handshake, then exchanges masked text frames."""
+
+    def __init__(self, port, host, path='/ws'):
+        self.socket = socket.create_connection(('127.0.0.1', port), timeout=5)
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.socket.sendall(
+            f'GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+            f'Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n'.encode()
+        )
+        self.stream = self.socket.makefile('rb')
+        self.status = int(self.stream.readline().split()[1])
+        self.headers = {}
+        while (line := self.stream.readline()) not in (b'\r\n', b''):
+            name, _, value = line.decode().partition(':')
+            self.headers[name.strip().lower()] = value.strip()
+        expected = base64.b64encode(hashlib.sha1((key + WEBSOCKET_GUID).encode()).digest()).decode()
+        self.accepted = self.headers.get('sec-websocket-accept') == expected
+
+    def exchange(self, text: str) -> str:
+        self.socket.sendall(frame(0x1, text.encode(), os.urandom(4)))
+        opcode, data = read_frame(self.stream)
+        assert opcode == 0x1, opcode
+        return data.decode()
+
+    def close(self):
+        try:
+            self.socket.sendall(frame(0x8, b'', os.urandom(4)))
+            read_frame(self.stream)
+        except OSError:
+            pass
+        self.socket.close()
 
 
 class FakeAuth(http.server.BaseHTTPRequestHandler):
@@ -74,12 +213,44 @@ class FakeAuth(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def serve(handler, tls_context=None) -> http.server.ThreadingHTTPServer:
-    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+class Server(http.server.ThreadingHTTPServer):
+    request_queue_size = 256
+    allow_reuse_address = True
+
+    def handle_error(self, request, client_address):
+        pass  # clients that give up on a slow response are expected here
+
+
+def serve(handler, tls_context=None, port=0) -> http.server.ThreadingHTTPServer:
+    """Starts a server on its own copy of `handler`, so class-level state is per server."""
+    server = Server(('127.0.0.1', port), type(handler.__name__, (handler,), {}))
     if tls_context:
         server.socket = tls_context.wrap_socket(server.socket, server_side=True)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
+
+
+def stop(server):
+    """Stops serving and closes the listening socket, so new connections are refused."""
+    server.shutdown()
+    server.server_close()
+
+
+class ClosingServer:
+    """Accepts connections and drops them without answering, like a crashing backend."""
+
+    def __init__(self):
+        self.socket = socket.create_server(('127.0.0.1', 0))
+        self.server_port = self.socket.getsockname()[1]
+        threading.Thread(target=self.run, daemon=True).start()
+
+    def run(self):
+        while True:
+            try:
+                connection, _ = self.socket.accept()
+            except OSError:
+                return
+            connection.close()
 
 
 def self_signed_certificate(directory: Path):
@@ -170,9 +341,15 @@ class Passage:
     def delete_route(self, route_id):
         assert self.api('/routes/' + route_id, 'DELETE')[0] == 204
 
-    def get(self, host, path='/', headers=None, tls_context=None):
+    def upstreams(self, route_id) -> dict:
+        """Live state of a route (`active` requests and `backends`), from /api/upstreams."""
+        routes = json.loads(self.api('/upstreams')[2])
+        return next(r for r in routes if r['route_id'] == route_id)
+
+    def get(self, host, path='/', headers=None, tls_context=None, timeout=5):
         port = self.tls_port if tls_context else self.proxy_port
-        return request(port, path, headers={'Host': host, **(headers or {})}, context=tls_context)
+        return request(port, path, headers={'Host': host, **(headers or {})},
+                       context=tls_context, timeout=timeout)
 
     def close(self):
         self.stop()

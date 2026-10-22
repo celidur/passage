@@ -2,6 +2,8 @@
 proxy_listen = "0.0.0.0:8081"
 admin_listen = "127.0.0.1:8080"
 data_dir = "./data"
+# How often upstream host names are looked up again, in seconds.
+# dns_refresh_secs = 30
 
 # Optional inbound TLS using an existing certificate. Restart after replacement.
 # [tls]

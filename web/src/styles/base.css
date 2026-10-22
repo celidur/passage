@@ -64,7 +64,9 @@ code {
 
 /* Form controls */
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 button {
@@ -85,7 +87,9 @@ a:focus-visible {
   outline: 3px solid #a5bd70;
   outline-offset: 3px;
 }
-input {
+input,
+select,
+textarea {
   width: 100%;
   border: 1px solid #dce1d6;
   border-radius: 7px;
@@ -94,9 +98,19 @@ input {
   color: #253b30;
   outline: none;
 }
-input:focus {
+textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+input:focus,
+select:focus,
+textarea:focus {
   border-color: #738a4d;
   box-shadow: 0 0 0 3px #b9cd9426;
+}
+input:disabled {
+  background: #f4f6f0;
+  color: #99a397;
 }
 input::placeholder {
   color: #99a397;
@@ -107,7 +121,9 @@ label {
   display: block;
   color: #4c5f50;
 }
-label input {
+label input,
+label select,
+label textarea {
   display: block;
   margin: 8px 0 0;
   font-weight: 400;
