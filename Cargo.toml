@@ -1,0 +1,40 @@
+[package]
+name = "passage"
+version = "0.1.0"
+edition = "2024"
+description = "A bare-metal-first reverse proxy manager powered by Pingora"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1"
+arc-swap = "1.7"
+async-trait = "0.1"
+axum = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+hex = "0.4"
+http = "1"
+mime_guess = "2"
+percent-encoding = "2"
+pingora = { version = "=0.9.0", features = ["proxy", "openssl"] }
+rand = "0.10"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+rust-embed = "8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+subtle = "2"
+# Pingora 0.9.0 builds zero-capacity BufStreams, which newer Tokio rejects; see docs/validation.md.
+tokio = { version = "=1.48.0", features = ["full"] }
+toml = "1.1.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+strip = true

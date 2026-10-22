@@ -1,0 +1,38 @@
+[Unit]
+Description=Passage reverse proxy manager
+Documentation=https://github.com/celidur/passage
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=passage
+Group=passage
+WorkingDirectory=/var/lib/passage
+StateDirectory=passage
+StateDirectoryMode=0700
+RuntimeDirectory=passage
+RuntimeDirectoryMode=0700
+ExecStartPre=/usr/local/bin/passage --config /etc/passage/config.toml check
+ExecStart=/usr/local/bin/passage --config /etc/passage/config.toml serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+KillSignal=SIGTERM
+UMask=0077
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/passage /run/passage
+
+[Install]
+WantedBy=multi-user.target
